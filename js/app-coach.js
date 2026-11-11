@@ -20,7 +20,9 @@
   const SITS = ['공항·전철', '렌터카·주유소', '식당·이자카야', '편의점·마트', '온천·호텔', '눈·날씨'];
   const summary = () => C.summarize(A.db, D.KANA, A.allWords());
   const isJSON = K => K.type === 'pack' || K.type === 'hints';
-  const coarse = () => !!A.touch;
+  // 휴대폰·아이패드(공유 창으로 Claude 앱에 보낼 수 있는 기기)인지. 터치스크린 노트북은 아님 — 그때는 복사·Claude 열기가 먼저
+const mobileOS = () => { const ua = navigator.userAgent || ''; return /iPhone|iPad|iPod|Android/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1); };
+const coarse = () => mobileOS() && AI.canShare();
   // 답에 섞인 간단한 마크다운만 보기 좋게 (나머지는 글자 그대로)
   function md(t) {
     return esc(t).replace(/```(?:\w+)?\n?([\s\S]*?)```/g, '<pre>$1</pre>').replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/^#{1,4}\s*(.+)$/gm, '<b>$1</b>').replace(/^(\s*)[-*]\s+/gm, '$1• ');
@@ -75,7 +77,7 @@
       body = `<textarea id="coachPrompt" readonly style="min-height:240px">${esc(C.buildPrompt('project'))}</textarea><div class="row" style="margin-top:12px"><button class="btn primary" data-act="coach-copy">${icon('copy')}복사</button></div>
         <p class="small">Claude 앱 → 프로젝트 → 새 프로젝트 → ‘지침’ 칸에 붙여 넣으면 돼요.</p>`;
     } else {
-      const share = AI.canShare() && coarse();
+      const share = coarse();
       body = `${sits}${kind === 'free' ? `<div class="field"><label class="lab" for="coachQ">질문</label><textarea id="coachQ" style="min-height:90px" placeholder="예: ‘つ’와 ‘っ’는 뭐가 달라요?"></textarea></div>` : ''}${sheetImg}
         ${blocked ? '' : `<div class="row">${K.type === 'image'
           ? `${share ? `<button class="btn primary" data-act="coach-share">${icon('share')}그림과 함께 Claude로 보내기</button>` : ''}<button class="btn ${share ? '' : 'primary'}" data-act="coach-save-img">그림 저장</button><button class="btn" data-act="coach-copy">${icon('copy')}부탁 글 복사</button>`
@@ -93,7 +95,7 @@
       const ta = $('#chatText');
       const send = () => { const v = ta.value.trim(); if (!v || !cur || cur.busy) return; ta.value = ''; ta.style.height = ''; run(v); };
       form.addEventListener('submit', e => { e.preventDefault(); send(); });
-      ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229 && !coarse()) { e.preventDefault(); send(); } });
+      ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229 && !mobileOS()) { e.preventDefault(); send(); } });
       ta.addEventListener('input', () => { ta.style.height = 'auto'; ta.style.height = Math.min(140, ta.scrollHeight) + 'px'; });
     }
     if (direct && kind === 'explain') run();

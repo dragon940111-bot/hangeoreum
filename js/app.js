@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const { data: D, store: S, sched: SC, stats: ST } = KL;
-  const A = KL.app = { VERSION: '0.2.0', pages: {}, acts: {}, segs: {} };
+  const A = KL.app = { VERSION: '0.2.1', pages: {}, acts: {}, segs: {} };
   const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
