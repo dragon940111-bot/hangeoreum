@@ -64,7 +64,8 @@
         // 안정된 조각(0..n-2)은 완성 층에 한 번만 그림 — 새로 생긴 조각만
         const stable = n >= 3 ? n - 1 : 0; setT(base); while (active.drawn < stable) { piece(base, s, active.drawn); active.drawn++; }
         // 꼬리 조각과 예측 끝점만 진행 층에 (다음 프레임에 지움)
-        if (n === 1) piece(live, s, 0); else if (n === 2) piece(live, s, 0, predicted); else piece(live, s, n - 1, predicted);
+        const tip = active.raw ? [active.raw, ...predicted] : predicted; // 안정화로 뒤처진 만큼을 실제 펜 끝까지 이어 그림
+        if (n === 1) { piece(live, s, 0); if (tip.length) { style(live, s); live.lineWidth = s.w[0]; live.beginPath(); live.moveTo(s.pts[0][0], s.pts[0][1]); for (const q of tip) live.lineTo(q[0], q[1]); live.stroke(); } } else if (n === 2) piece(live, s, 0, tip); else piece(live, s, n - 1, tip);
       }
       if (eraserAt) { live.lineWidth = 1.5 / scale; live.strokeStyle = 'rgba(29,36,51,.45)'; live.beginPath(); live.arc(eraserAt[0], eraserAt[1], ERASE_R / scale, 0, Math.PI * 2); live.stroke(); }
     }
@@ -84,7 +85,7 @@
         const dx = (rx - last[0]) * scale, dy = (ry - last[1]) * scale;
         if (dx * dx + dy * dy < 0.36) { active.raw = [rx, ry]; return; } // 0.6px 미만은 건너뜀
         // 가벼운 안정화: 지연이 느껴지지 않게 약하게(새 점 쪽 0.62)
-        const k = 0.62, x = last[0] + (rx - last[0]) * k, y = last[1] + (ry - last[1]) * k;
+        const k = type === 'pen' ? 0.82 : 0.62, x = last[0] + (rx - last[0]) * k, y = last[1] + (ry - last[1]) * k;
         const dt = Math.max(1, t - last[3]), v = Math.hypot((x - last[0]) * scale, (y - last[1]) * scale) / dt;
         const tw = targetWidth(type, e.pressure, v), pw = s.w[s.w.length - 1];
         s.pts.push([x, y, e.pressure || 0, t]); s.w.push(pw + (tw - pw) * 0.35);
@@ -133,11 +134,16 @@
       }
       if (active) return;
       if (!allowed(type)) { e.preventDefault(); return; }
+      if (palm === 'auto' && type === 'touch' && Math.max(e.width || 0, e.height || 0) > 56) { e.preventDefault(); return; } // 접촉면이 넓으면 손바닥
+      if (palm === 'auto' && type === 'pen') { // 펜이 닿기 직전(0.6초 안)에 끝난 터치 획은 손바닥 자국으로 보고 지움
+        const lastOp = ops[ops.length - 1], t = e.timeStamp || performance.now();
+        if (lastOp && lastOp.type === 'add' && lastOp.strokes[0].type === 'touch' && t - (lastOp.strokes[0].endT || 0) < 600) { lastOp.strokes[0].gone = true; ops.pop(); redrawBase(); }
+      }
       if (type === 'mouse' && e.button !== 0) return;
       e.preventDefault();
       rect = container.getBoundingClientRect();
       try { container.setPointerCapture(e.pointerId); } catch (_) { /* 합성 이벤트 등 */ }
-      if (tool === 'eraser') { active = { id: e.pointerId, type, erased: [] }; eraseAt(e); schedule(); return; }
+      if (tool === 'eraser' || (type === 'pen' && (e.buttons & 32))) { active = { id: e.pointerId, type, erased: [] }; eraseAt(e); schedule(); return; }
       const s = { id: nextId++, pts: [], w: [], type, color, gone: false };
       active = { id: e.pointerId, type, stroke: s, drawn: 0 };
       strokes.push(s); addPoint(e, type); predicted = [];
@@ -149,7 +155,7 @@
       e.preventDefault();
       const list = (e.getCoalescedEvents && e.getCoalescedEvents()) || [];
       const evs = list.length ? list : [e];
-      if (tool === 'eraser' && !active.stroke) { for (const c of evs) eraseAt(c); schedule(); return; }
+      if (!active.stroke) { for (const c of evs) eraseAt(c); schedule(); return; }
       for (const c of evs) addPoint(c, active.type);
       const pr = (e.getPredictedEvents && e.getPredictedEvents()) || [];
       predicted = pr.slice(0, 3).map(toRef);
@@ -165,6 +171,7 @@
         if (a.raw && s.pts.length) { const l = s.pts[s.pts.length - 1]; if (Math.hypot((a.raw[0] - l[0]) * scale, (a.raw[1] - l[1]) * scale) >= 0.6) { s.pts.push([a.raw[0], a.raw[1], l[2], l[3]]); s.w.push(s.w[s.w.length - 1]); } }
         // 끝을 살짝 가늘게(펜을 뗄 때 자연스럽게)
         if (s.type === 'pen' && s.w.length > 4) { const n = s.w.length; s.w[n - 1] *= 0.82; s.w[n - 2] *= 0.9; s.w[n - 3] *= 0.96; }
+        s.endT = (e && e.timeStamp) || performance.now();
         push({ type: 'add', strokes: [s] });
       } else if (a.erased && a.erased.length) push({ type: 'erase', strokes: a.erased });
       redrawBase(); clearLive();
@@ -177,7 +184,8 @@
     container.addEventListener('pointerdown', down);
     container.addEventListener('pointermove', move);
     container.addEventListener('pointerup', finish);
-    container.addEventListener('pointercancel', finish);
+    const onCancel = e => { if (active && e.pointerId === active.id && active.type === 'touch' && palm !== 'all') cancelActive(); else finish(e); }; // 터치가 취소되면(손바닥으로 판단돼서 등) 그 획은 버림
+    container.addEventListener('pointercancel', onCancel);
     container.addEventListener('lostpointercapture', finish);
     container.addEventListener('touchstart', prevent, { passive: false });
     container.addEventListener('touchmove', prevent, { passive: false });
@@ -219,7 +227,7 @@
       destroy() {
         if (raf) cancelAnimationFrame(raf); if (ro) ro.disconnect(); else g.removeEventListener('resize', sizeTo);
         container.removeEventListener('pointerdown', down); container.removeEventListener('pointermove', move);
-        container.removeEventListener('pointerup', finish); container.removeEventListener('pointercancel', finish); container.removeEventListener('lostpointercapture', finish);
+        container.removeEventListener('pointerup', finish); container.removeEventListener('pointercancel', onCancel); container.removeEventListener('lostpointercapture', finish);
         container.removeEventListener('touchstart', prevent); container.removeEventListener('touchmove', prevent);
         container.removeEventListener('gesturestart', prevent); container.removeEventListener('contextmenu', prevent);
         container.removeEventListener('selectstart', prevent); container.removeEventListener('dblclick', prevent);

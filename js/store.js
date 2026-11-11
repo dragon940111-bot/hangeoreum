@@ -31,7 +31,11 @@
     if (typeof a.correct !== 'boolean') return 'correct';
     if (a.input !== undefined && !isStr(a.input, 300)) return 'input';
     if (a.source !== undefined && !isStr(a.source, 40)) return 'source';
-    if (!optBool(a.assisted) || !optBool(a.hesitant) || !optBool(a.corrected) || !optBool(a.originalCorrect)) return 'flags';
+    if (!optBool(a.assisted) || !optBool(a.hesitant) || !optBool(a.corrected) || !optBool(a.originalCorrect) || !optBool(a.slow)) return 'flags';
+    if (a.mistook !== undefined && !isStr(a.mistook, 8)) return 'mistook';
+    if (a.phase !== undefined && !isStr(a.phase, 20)) return 'phase';
+    if (a.lenient !== undefined && !isStr(a.lenient, 20)) return 'lenient';
+    if (a.correctedAt !== undefined && !isTime(a.correctedAt)) return 'correctedAt';
     if (!optNum(a.shapeScore, -1e3, 1e3)) return 'shapeScore';
     if (a.recognition !== undefined && !isStr(a.recognition, 400)) return 'recognition';
     return '';
@@ -40,7 +44,7 @@
     if (!s || typeof s !== 'object' || !isStr(s.id, 100) || !s.id) return 'id';
     if (!isTime(s.start)) return 'start';
     if (s.end !== undefined && s.end !== null && !isTime(s.end)) return 'end';
-    if (s.mode !== undefined && !MODES.includes(s.mode)) return 'mode';
+    if (s.mode !== undefined && !MODES.includes(s.mode) && !['course', 'placement'].includes(s.mode)) return 'mode';
     if (s.script !== undefined && !SCRIPTS.includes(s.script)) return 'script';
     if (!optNum(s.n, 0, 1e7)) return 'n';
     return '';
@@ -71,7 +75,7 @@
       if (x.settings && typeof x.settings === 'object' && !Array.isArray(x.settings)) db.settings = sanitizeSettings(x.settings);
       if (Array.isArray(x.quarantine)) db.quarantine.push(...x.quarantine.slice(0, 5000));
       if (x.meta && typeof x.meta === 'object') db.meta = { ...db.meta, ...x.meta };
-      if (Array.isArray(x.samples)) db.samples = x.samples.filter(checkSample).slice(-2000);
+      if (Array.isArray(x.samples)) db.samples = x.samples.filter(checkSample).slice(-300);
       if (x.hints && typeof x.hints === 'object') { db.hints = {}; for (const [k, v] of Object.entries(x.hints)) if (isStr(k, 4) && isStr(v, 120)) db.hints[k] = v; }
       if (x.mine && typeof x.mine === 'object') { db.mine = {}; for (const [k, v] of Object.entries(x.mine)) if (isStr(k, 4) && Array.isArray(v)) { const ok = v.filter(checkSample).slice(-5); if (ok.length) db.mine[k] = ok; } }
     } else {
@@ -80,7 +84,7 @@
     db.quarantine.push(...bad);
     return db;
   }
-  const SETTING_KEYS = { script: ['h', 'k', 'mix'], newLimit: [5, 10, 15, 20], tolerance: ['strict', 'normal', 'relaxed'], palm: ['auto', 'pen', 'all'], range: null, onboarded: [true, false], wordsFirst: [true, false], usePacks: [true, false], collect: [true, false], learnMine: [true, false], study: ['adaptive', 'normal', 'review'], typeKind: ['words', 'chars'] };
+  const SETTING_KEYS = { script: ['h', 'k', 'mix'], newLimit: [5, 10, 15, 20], tolerance: ['strict', 'normal', 'relaxed'], palm: ['auto', 'pen', 'all'], range: null, onboarded: [true, false], wordsFirst: [true, false], usePacks: [true, false], collect: [true, false], learnMine: [true, false], study: ['adaptive', 'normal', 'review'], typeKind: ['words', 'chars'], auto: [true, false], courseWrite: [true, false], placed: [true, false] };
   function sanitizeSettings(s) {
     const out = {};
     for (const [k, allowed] of Object.entries(SETTING_KEYS)) {

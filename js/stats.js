@@ -37,5 +37,18 @@
     const k = KL.sched.dayKey(now); const list = attempts.filter(a => KL.sched.dayKey(Date.parse(a.time)) === k);
     return { n: list.length, c: list.filter(a => a.correct).length, min: list.reduce((n, a) => n + a.elapsedMs, 0) / 60000 };
   }
-  KL.stats = { summary, overview, byItem, dayStreak, today };
+  // 실제로 헷갈린 짝: 틀렸을 때 다른 글자의 소리를 입력했거나(읽기), 다른 글자를 골랐거나(헷갈리는 글자), 다른 글자처럼 썼을 때(쓰기)
+  function confusions(attempts) {
+    const m = new Map();
+    for (const a of attempts) { if (a.correct || !a.mistook || a.mistook === a.text) continue; const k = [a.text, a.mistook].sort().join('|'); const o = m.get(k) || { a: a.text, b: a.mistook, n: 0, last: a.time }; o.n++; o.last = a.time; m.set(k, o); }
+    return [...m.values()].sort((x, y) => y.n - x.n || Date.parse(y.last) - Date.parse(x.last));
+  }
+  // 최근 days일 동안 날마다 푼 문제 수와 맞힌 수
+  function daily(attempts, days = 14, now = Date.now()) {
+    const out = []; const by = new Map();
+    for (const a of attempts) { const k = KL.sched.dayKey(Date.parse(a.time)); const o = by.get(k) || { n: 0, c: 0 }; o.n++; if (a.correct) o.c++; by.set(k, o); }
+    for (let i = days - 1; i >= 0; i--) { const t = now - i * 864e5, d = new Date(t), o = by.get(KL.sched.dayKey(t)) || { n: 0, c: 0 }; out.push({ label: (d.getMonth() + 1) + '/' + d.getDate(), day: '일월화수목금토'[d.getDay()], n: o.n, c: o.c }); }
+    return out;
+  }
+  KL.stats = { confusions, daily, summary, overview, byItem, dayStreak, today };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
