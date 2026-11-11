@@ -41,18 +41,25 @@
   function stampOnce() { const k = 'hangeoreum-stamp', d = dayKey(Date.now()); try { if (sessionStorage.getItem(k) === d) return false; sessionStorage.setItem(k, d); } catch (e) { } return true; }
   A.pages.today = () => {
     const s = set(), p = A.coursePlan(), streak = ST.dayStreak(A.db.attempts), today = ST.today(A.db.attempts), mc = miniChart(s.script);
-    const seenAny = A.db.attempts.length > 0, wrongAny = A.db.attempts.some(a => !a.correct);
+    const wrongAny = A.db.attempts.some(a => !a.correct);
     const nextDue = p.pool.map(i => A.idx.state(i.id, 'read')).filter(st => st.reps && st.due > Date.now()).map(st => st.due).sort((a, b) => a - b)[0];
     const steps = [['복습', p.due.length], ['새 글자', p.fresh.length], ['써 보기', p.write.length], ['단어 읽기', p.words.length]].filter(x => x[1]);
     const hero = p.total ? `<section class="hero">
         <div><h2 class="h2">${today.n ? '남은 공부' : '오늘 할 공부'}</h2>
           <ol class="steps">${steps.map(([l, n]) => `<li><b>${n}</b><span>${l}</span></li>`).join('')}</ol>
-          <p class="small">${p.minutes}분쯤 걸려요${p.dueMore > 0 ? ` · 복습이 많아서 ${p.due.length}개만 먼저 해요` : ''}</p></div>
+          <p class="small plan-line">${p.minutes}분쯤 걸려요${p.dueMore > 0 ? ` · 복습이 많아서 ${p.due.length}개만 먼저 해요` : ''}${p.rows.length ? ` · 새 글자는 ${rowNames(p.rows)}에서` : ''}<button class="linkbtn" data-act="plan">${icon('gear')}양·범위 정하기</button></p></div>
         <button class="btn primary big" data-act="course">${today.n ? '이어서 하기' : '시작하기'}</button></section>`
-      : `<section class="hero done">
-        <div class="row" style="gap:18px;flex-wrap:nowrap">${seenAny ? `<span class="hanko ${stampOnce() ? 'stamp' : ''}" role="img" aria-label="완료" lang="ja">済</span>` : ''}
-          <div><h2 class="h2">${seenAny ? '오늘 공부를 다 했어요' : '범위에 배울 글자가 없어요'}</h2><p class="small">${nextDue ? `다음 복습은 ${whenDue(nextDue)}예요. 그 전에는 자유롭게 연습해도 좋아요.` : '아래에서 골라 자유롭게 연습해 보세요.'}</p></div></div>
-        <button class="btn big" data-act="start" data-mode="read" data-study="normal">더 연습하기</button></section>`;
+      : (() => {
+        // 할 공부가 없을 때: 왜 없는지에 맞춰 말해요
+        let title, sub;
+        if (s.newLimit === 0) { title = '오늘은 복습만 하기로 했어요'; sub = nextDue ? `복습할 글자가 지금은 없어요. 다음 복습은 ${whenDue(nextDue)}예요.` : '복습할 글자가 아직 없어요. 새 글자를 배우려면 양을 늘려 보세요.'; }
+        else if (p.left === 0) { title = '오늘 공부를 다 했어요'; sub = nextDue ? `다음 복습은 ${whenDue(nextDue)}예요. 더 하고 싶으면 새 글자 수를 늘리거나 자유롭게 연습하세요.` : '더 하고 싶으면 새 글자 수를 늘리거나 자유롭게 연습하세요.'; }
+        else { title = p.rows.length ? '고른 행의 글자를 다 배웠어요' : '범위의 글자를 다 배웠어요'; sub = '다른 행이나 범위를 고르면 새 글자를 더 배울 수 있어요.'; }
+        return `<section class="hero done">
+        <div class="row" style="gap:18px;flex-wrap:nowrap">${today.n ? `<span class="hanko ${stampOnce() ? 'stamp' : ''}" role="img" aria-label="완료" lang="ja">済</span>` : ''}
+          <div><h2 class="h2">${title}</h2><p class="small">${sub}</p></div></div>
+        <div class="row"><button class="btn big" data-act="plan">${s.newLimit === 0 || p.left === 0 ? '새 글자 더 배우기' : '양·범위 정하기'}</button><button class="btn big ghost" data-act="start" data-mode="read" data-study="normal">더 연습하기</button></div></section>`;
+      })();
     const place = !s.placed && mc.known < 5 && A.db.attempts.length < 40 ? `<div class="note info rowed"><span><b>예전에 배운 적이 있나요?</b> 아는 글자를 먼저 확인하면 건너뛸 수 있어요. 3분쯤 걸려요.</span><button class="btn sm" data-act="placement">아는 글자 확인</button></div>` : '';
     const basic = A.kanaPool(s.script === 'mix' ? 'h' : s.script, ['basic']);
     const solid = basic.filter(i => A.idx.state(i.id, 'read').stage >= 2).length;
@@ -82,24 +89,73 @@
         <div class="field"><span class="lab">글자</span>${seg('script', [['h', '히라가나'], ['k', '가타카나'], ['mix', '둘 다']], s.script)}</div>
         ${mode === 'typing' ? `<div class="field"><span class="lab">문제</span>${seg('typeKind', [['words', '단어'], ['chars', '글자 여러 개']], s.typeKind)}<p class="small">${s.typeKind === 'words' ? '한자 없이 가나로만 된 단어가 나와요.' : '글자 3~5개가 한 줄로 나와요.'}</p></div>` : ''}
         ${mode !== 'typing' || s.typeKind === 'chars' ? `<div class="field"><span class="lab">범위</span><div class="chips">${ranges.map(([v, l]) => `<button class="chip" data-act="range" data-v="${v}" aria-pressed="${s.range.includes(v)}">${l}</button>`).join('')}</div><p class="small">요음은 きゃ처럼 작은 글자가 붙은 것이고, 외래어 표기(ファ, ティ)는 가타카나에만 있어요.</p></div>` : ''}
+        ${mode !== 'typing' || s.typeKind === 'chars' ? `<div class="field"><span class="lab">행</span><div id="freeRows">${rowChips('rows', s.range)}</div><p class="small">'전체'면 고른 범위의 글자가 다 나와요. か행만 연습하고 싶을 때 쓰세요.</p></div>` : ''}
         <div class="field"><span class="lab">나오는 순서</span>${seg('study', [['adaptive', '추천'], ['normal', '골고루'], ['review', '틀린 것 먼저']], s.study)}<p class="small">${how}</p></div>
         <button class="btn primary big wide" data-act="start" data-mode="${mode}">시작하기</button>
         <p class="small center">끝내기를 누를 때까지 계속 나와요.</p>
       </div>`);
-    $('#sheet').dataset.mode = mode;
+    $('#sheet').dataset.mode = mode; $('#sheet').dataset.kind = 'setup';
   }
   Object.assign(A.acts, {
     course: () => A.startCourse(),
     placement: () => A.startPlacement(),
     setup: b => setupSheet(b.dataset.mode),
     start: b => A.startFree({ mode: b.dataset.mode || $('#sheet').dataset.mode, study: b.dataset.study }),
-    range: (b, v) => { const s = set(); const r = s.range.includes(v) ? s.range.filter(x => x !== v) : [...s.range, v]; if (!r.length) { toast('범위는 하나 이상 골라야 해요.'); return; } A.setSetting('range', r); b.setAttribute('aria-pressed', String(r.includes(v))); },
+    range: (b, v) => { const s = set(); const r = s.range.includes(v) ? s.range.filter(x => x !== v) : [...s.range, v]; if (!r.length) { toast('범위는 하나 이상 골라야 해요.'); return; } A.setSetting('range', r); b.setAttribute('aria-pressed', String(r.includes(v))); A.planRefresh(); },
     'add-range': (b, v) => { A.setSetting('range', [...new Set([...set().range, v])]); A.pages.today(); toast('탁음·반탁음을 범위에 넣었어요.'); }
   });
   Object.assign(A.segs, {
     script: v => { A.setSetting('script', v); if (A.view === 'today' && $('#sheet').hidden) A.pages.today(); },
     typeKind: v => { A.setSetting('typeKind', v); setupSheet('typing'); },
     study: v => { A.setSetting('study', v); setupSheet($('#sheet').dataset.mode); }
+  });
+
+  // ── 행 고르기 칩 (오늘 공부의 새 글자 / 자유 연습) ──
+  const GROUP_ORDER = ['basic', 'voiced', 'yoon', 'ext'];
+  function rowNames(keys) { const s = set(), all = A.rowsFor(s.script, GROUP_ORDER); const names = keys.map(k => { const r = all.find(x => x.key === k); return r ? (r.kana ? r.kana + '행' : r.ko) : ''; }).filter(Boolean); return names.length > 3 ? names.slice(0, 3).join('·') + ` 등 ${names.length}개 행` : names.join('·'); }
+  function rowChips(key, groups, mark) {
+    const s = set(), chosen = s[key] || [], rows = A.rowsFor(s.script, groups);
+    if (!rows.length) return '<p class="small">고른 범위에 행이 없어요.</p>';
+    const byG = GROUP_ORDER.filter(g => rows.some(r => r.group === g));
+    return `<div class="chips"><button class="chip" data-act="rows-all" data-k="${key}" aria-pressed="${!chosen.some(c => rows.some(r => r.key === c))}">${key === 'newRows' ? '차례대로' : '전체'}</button></div>` +
+      byG.map(g => `<div class="row-group"><span class="small">${A.GROUP_KO[g]}</span><div class="chips">${rows.filter(r => r.group === g).map(r => {
+        const done = mark && mark(r.key);
+        return `<button class="chip rowchip ${done ? 'done' : ''}" data-act="row-pick" data-k="${key}" data-v="${esc(r.key)}" aria-pressed="${chosen.includes(r.key)}"${done ? ' title="다 배운 행"' : ''}>${r.kana ? `<span class="kana" lang="ja">${esc(r.kana)}</span>` : ''}${esc(r.ko)}${done ? ' ✓' : ''}</button>`;
+      }).join('')}</div></div>`).join('');
+  }
+  // 이 행의 글자를 (읽기에서) 다 배웠는지
+  const rowLearned = key => { const s = set(); const items = A.kanaPool(s.script, GROUP_ORDER).filter(k => A.rowOf(k) === key); return items.length && items.every(k => A.idx.seen(k.id, 'read')); };
+
+  // ── 오늘 공부 정하기 (양·범위) ──
+  function planSummary() {
+    const p = A.coursePlan(), s = set(), done = A.idx.startedToday('read', Date.now());
+    const parts = [['복습', p.due.length], ['새 글자', p.fresh.length], ['써 보기', p.write.length], ['단어 읽기', p.words.length]].filter(x => x[1]);
+    return `<b>${parts.length ? parts.map(([l, n]) => `${l} ${n}`).join(' · ') : '할 공부가 없어요'}</b>${parts.length ? ` · ${p.minutes}분쯤` : ''}` +
+      (s.newLimit && done && p.left === 0 ? `<br><span class="small">오늘 새 글자 ${done}개를 이미 배웠어요. 더 배우려면 새 글자 수를 늘리세요.</span>` : done ? `<br><span class="small">오늘 이미 새 글자 ${done}개를 배웠어요(하루 한도에 들어가요).</span>` : '') +
+      (p.rows.length && !p.fresh.length && p.left ? `<br><span class="small">고른 행의 글자는 이미 다 배웠어요. 다른 행을 골라 보세요.</span>` : '');
+  }
+  function planSheet() {
+    const s = set();
+    A.openSheet(`<div class="sheet-head"><div><h2 class="h2">오늘 공부 정하기</h2><p class="small">바꾼 값은 다음에도 그대로 쓰여요.</p></div><button class="btn icon ghost" data-act="close" aria-label="닫기">${icon('close')}</button></div>
+      <div class="form">
+        <div class="field"><span class="lab">하루에 배울 새 글자</span>${seg('newLimit', [[0, '복습만'], [3, '3개'], [5, '5개'], [10, '10개'], [15, '15개'], [20, '20개']], s.newLimit)}</div>
+        <div class="field"><span class="lab">새 글자를 배울 행</span><div id="planRows">${rowChips('newRows', GROUP_ORDER, rowLearned)}</div>
+          <p class="small">'차례대로'면 범위의 첫 행부터 배워요. 행을 고르면 그 행의 글자부터 배우고, <b>복습은 행과 상관없이 배운 글자가 모두 섞여 나와요</b>(순서로 외우지 않게). ✓는 다 배운 행이에요.</p></div>
+        <div class="field"><span class="lab">복습은 한 번에 최대</span>${seg('dueMax', [[10, '10개'], [20, '20개'], [30, '30개'], [999, '전부']], s.dueMax)}</div>
+        <div class="list switches">
+          <div class="li"><span class="li-body"><b>써 보기 넣기</b><span>손으로 쓸 수 없는 곳이면 끄세요.</span></span><button class="switch" role="switch" aria-checked="${!!s.courseWrite}" data-act="toggle" data-v="courseWrite" aria-label="써 보기 넣기"><i></i></button></div>
+          <div class="li"><span class="li-body"><b>단어 읽기 넣기</b><span>배운 글자로 된 단어를 마지막에 읽어요.</span></span><button class="switch" role="switch" aria-checked="${!!s.courseWords}" data-act="toggle" data-v="courseWords" aria-label="단어 읽기 넣기"><i></i></button></div>
+        </div>
+        <p class="plan-sum" id="planSum" role="status">${planSummary()}</p>
+        <button class="btn primary big wide" data-act="course">이대로 시작하기</button>
+      </div>`, () => { if (A.view === 'today') A.pages.today(); });
+    $('#sheet').dataset.kind = 'plan';
+  }
+  A.planRefresh = () => { const sh = $('#sheet'); if (sh.hidden) return; if (sh.dataset.kind === 'plan' && $('#planSum')) { $('#planSum').innerHTML = planSummary(); $('#planRows').innerHTML = rowChips('newRows', GROUP_ORDER, rowLearned); } else if ($('#freeRows')) $('#freeRows').innerHTML = rowChips('rows', set().range); };
+  Object.assign(A.acts, {
+    plan: () => planSheet(),
+    'row-pick': b => { const k = b.dataset.k, v = b.dataset.v, cur = set()[k] || []; A.setSetting(k, cur.includes(v) ? cur.filter(x => x !== v) : [...cur, v]); A.planRefresh(); },
+    'rows-all': b => { A.setSetting(b.dataset.k, []); A.planRefresh(); }
   });
 
   // ── 결과 ──
@@ -225,7 +281,7 @@
     const off = { on: '인터넷이 없어도 열려요.', failed: '오프라인 준비에 실패했어요. 인터넷이 있을 때만 열려요.', none: '이 주소에서는 인터넷이 있어야 열려요.' }[A.offline.state];
     $('#view').innerHTML = `${notice()}<div class="page-head"><div><h1 class="h1">설정</h1><p class="sub">가입 없이 쓰고, 기록은 이 기기의 브라우저에만 저장돼요.</p></div></div>
       <h2 class="h2">공부</h2><div class="list">
-        ${li('하루에 배울 새 글자', '읽기와 쓰기에 따로 적용돼요.', seg('newLimit', [[5, '5개'], [10, '10개'], [15, '15개'], [20, '20개']], s.newLimit))}
+        ${li('하루에 배울 새 글자', '오늘 화면의 \'양·범위 정하기\'에서도 바꿀 수 있어요. 배울 행도 거기서 골라요.', seg('newLimit', [[0, '복습만'], [3, '3개'], [5, '5개'], [10, '10개'], [15, '15개'], [20, '20개']], s.newLimit))}
         ${li('오늘 공부에 쓰기 넣기', '끄면 오늘 공부가 읽기와 단어 읽기로만 이어져요.', onoff('courseWrite', s.courseWrite, '오늘 공부에 쓰기 넣기'))}
         ${li('맞히면 바로 다음 문제로', '켜면 정답일 때 1초 뒤에 저절로 넘어가요.', onoff('auto', s.auto, '맞히면 바로 다음 문제로'))}
         ${li('아는 글자로 된 단어 먼저', '단어 읽기에서 읽을 수 있는 글자가 많은 단어부터 나와요.', onoff('wordsFirst', s.wordsFirst, '아는 글자로 된 단어 먼저'))}
@@ -260,9 +316,9 @@
       toast('기록을 가져왔어요.');
     } catch (err) { msg('가져오지 못했어요. ' + err.message + ' 지금 기록은 그대로예요.'); }
   }
-  Object.assign(A.segs, { newLimit: v => A.setSetting('newLimit', +v), tolerance: v => A.setSetting('tolerance', v), palm: v => A.setSetting('palm', v) });
+  Object.assign(A.segs, { newLimit: v => { A.setSetting('newLimit', +v); A.planRefresh(); }, dueMax: v => { A.setSetting('dueMax', +v); A.planRefresh(); }, tolerance: v => A.setSetting('tolerance', v), palm: v => A.setSetting('palm', v) });
   Object.assign(A.acts, {
-    toggle: (b, v) => { const on = !set()[v]; A.setSetting(v, on); b.setAttribute('aria-checked', String(on)); },
+    toggle: (b, v) => { const on = !set()[v]; A.setSetting(v, on); b.setAttribute('aria-checked', String(on)); A.planRefresh(); },
     'export-json': () => A.exportSheet('기록 백업', 'hangeoreum-backup-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(A.db), 'application/json'),
     'export-samples': () => A.exportSheet('모아 둔 글씨', 'hangeoreum-handwriting-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify({ kind: 'handwriting-samples', version: 1, samples: A.db.samples || [], mine: A.db.mine || {} }), 'application/json'),
     'paste-import': () => A.openSheet(`<div class="sheet-head"><h2 class="h2">붙여 넣어 가져오기</h2><button class="btn icon ghost" data-act="close" aria-label="닫기">${icon('close')}</button></div>

@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const { data: D, store: S, sched: SC, stats: ST } = KL;
-  const A = KL.app = { VERSION: '0.2.2', pages: {}, acts: {}, segs: {} };
+  const A = KL.app = { VERSION: '0.3.0', pages: {}, acts: {}, segs: {} };
   const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
@@ -20,7 +20,7 @@
   const LS = A.LS = safeLS();
   const store = A.store = S.makeStore(LS);
   A.db = store.db; A.idx = SC.makeIndex(A.db.attempts);
-  const DEF = { script: 'h', newLimit: 5, tolerance: 'relaxed', palm: 'auto', range: ['basic'], wordsFirst: true, usePacks: true, collect: true, learnMine: true, study: 'adaptive', typeKind: 'words', auto: false, courseWrite: true };
+  const DEF = { dueMax: 30, courseWords: true, newRows: [], rows: [], script: 'h', newLimit: 5, tolerance: 'relaxed', palm: 'auto', range: ['basic'], wordsFirst: true, usePacks: true, collect: true, learnMine: true, study: 'adaptive', typeKind: 'words', auto: false, courseWrite: true };
   const set = A.set = () => ({ ...DEF, ...A.db.settings });
   A.setSetting = (k, v) => { A.db.settings[k] = v; save(); };
   function save() { const ok = store.save(); if (!ok && !store.corrupt) toast('이 브라우저에 저장하지 못했어요. 설정에서 기록을 백업해 주세요.'); return ok; }
@@ -58,6 +58,28 @@
   };
   A.hasPartner = item => item.kind === 'kana' && (D.PAIRS.some(p => p.includes(item.text)) || D.KANA.some(k => k.id !== item.id && k.script === item.script && [...k.text].length === [...item.text].length && bare(k.text) === bare(item.text)));
   A.confusable = item => { if (item.kind !== 'kana') return null; const p = D.PAIRS.find(x => x.includes(item.text)); if (!p) return null; return D.KANA.find(k => k.script === item.script && k.text !== item.text && p.includes(k.text)) || null; };
+  // ── 행 (あ행·か행… / が행… / きゃ행… / 외래어 표기) ──
+  const toHira = t => t.replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60));
+  const ROW_STR = ['あいうえお', 'かきくけこ', 'さしすせそ', 'たちつてと', 'なにぬねの', 'はひふへほ', 'まみむめも', 'やゆよ', 'らりるれろ', 'わをん', 'がぎぐげご', 'ざじずぜぞ', 'だぢづでど', 'ばびぶべぼ', 'ぱぴぷぺぽ'];
+  A.rowOf = k => {
+    if (!k || k.kind !== 'kana') return null;
+    if (k.group === 'ext') return 'ext';
+    const h = toHira(k.text);
+    if (k.group === 'yoon') return h[0] + 'ゃ';
+    const r = ROW_STR.find(x => x.includes(h)); return r ? r[0] : null;
+  };
+  // 글자(script)와 묶음(groups)에 있는 행들 — 표 순서대로 {key, group, kana, ko}
+  A.rowsFor = (script, groups) => {
+    const sc = script === 'mix' ? 'h' : script, out = [], seen = new Set();
+    for (const k of D.KANA) {
+      if (!groups.includes(k.group)) continue;
+      if (k.group === 'ext' ? script === 'h' : k.script !== sc) continue;
+      const key = A.rowOf(k); if (!key || seen.has(key)) continue; seen.add(key);
+      out.push({ key, group: k.group, kana: key === 'ext' ? '' : (sc === 'k' ? D.kata(key) : key), ko: key === 'ext' ? '외래어 표기' : k.answers[0] + '행' });
+    }
+    return out;
+  };
+  A.inRows = (k, rows) => !rows || !rows.length || rows.includes(A.rowOf(k));
   A.knownKana = () => { const s = new Set(); for (const k of D.KANA) if (A.idx.get(k.id, 'read').some(a => a.correct && !a.assisted)) s.add(k.text); return s; };
 
   // ── 작은 도구 ──
@@ -82,7 +104,7 @@
   A.openSheet = (html, onClose) => {
     const sh = $('#sheet'), bd = $('#backdrop');
     sheetOpener = document.activeElement;
-    sh.innerHTML = html; sh.hidden = false; bd.hidden = false; sheetClose = onClose || null; sh.scrollTop = 0;
+    sh.innerHTML = html; sh.dataset.kind = ''; sh.hidden = false; bd.hidden = false; sheetClose = onClose || null; sh.scrollTop = 0;
     requestAnimationFrame(() => { sh.classList.add('on'); bd.classList.add('on'); });
     const f = sh.querySelector('[autofocus]') || sh.querySelector('button, a[href], textarea, input'); if (f) f.focus({ preventScroll: true });
   };

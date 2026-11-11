@@ -18,25 +18,31 @@
 
   // ── 오늘 공부 계획 ──
   A.coursePlan = (now = Date.now()) => {
-    const s = set(), idx = A.idx, pool = A.kanaPool(s.script, s.range);
-    const dueAll = pool.filter(i => { const st = idx.state(i.id, 'read'); return st.reps && st.due <= now; }).sort((a, b) => idx.state(a.id, 'read').due - idx.state(b.id, 'read').due);
-    const due = dueAll.slice(0, 30);
+    const s = set(), idx = A.idx, all = A.kanaPool(s.script, ['basic', 'voiced', 'yoon', 'ext']), pool = A.kanaPool(s.script, s.range);
+    // 복습: 고른 범위·행과 상관없이 배운 글자 전부 (행만 계속 보면 순서로 외우게 되니 섞어서 냄 — 시작할 때 섞음)
+    const dueAll = all.filter(i => { const st = idx.state(i.id, 'read'); return st.reps && st.due <= now; }).sort((a, b) => idx.state(a.id, 'read').due - idx.state(b.id, 'read').due);
+    const due = dueAll.slice(0, s.dueMax);
     const left = Math.max(0, s.newLimit - idx.startedToday('read', now));
-    const fresh = pool.filter(i => !idx.seen(i.id, 'read')).slice(0, left);
+    const rows = (s.newRows || []).filter(r => A.rowsFor(s.script, ['basic', 'voiced', 'yoon', 'ext']).some(x => x.key === r));
+    const newFrom = rows.length ? all.filter(k => A.inRows(k, rows)) : pool; // 행을 고르면 그 행에서, 아니면 범위의 첫 행부터 차례대로
+    const fresh = newFrom.filter(i => !idx.seen(i.id, 'read')).slice(0, left);
     let write = [];
     if (s.courseWrite) {
-      const wDue = pool.filter(i => { const st = idx.state(i.id, 'write'); return st.reps && st.due <= now; }).slice(0, 5);
+      const wDue = all.filter(i => { const st = idx.state(i.id, 'write'); return st.reps && st.due <= now; }).slice(0, 5);
       write = [...fresh, ...wDue.filter(w => !fresh.includes(w))];
-      if (!write.length) write = pool.filter(i => idx.seen(i.id, 'read') && !idx.seen(i.id, 'write')).slice(0, 3); // 읽을 줄만 아는 글자를 조금씩 써 보기
+      if (!write.length) write = all.filter(i => idx.seen(i.id, 'read') && !idx.seen(i.id, 'write')).slice(0, 3); // 읽을 줄만 아는 글자를 조금씩 써 보기
       write = write.slice(0, 8);
     }
-    const known = A.knownKana(); for (const f of fresh) known.add(f.text);
-    const readable = A.wordPool(s.script).filter(w => { const u = D.units(w.text); return u.length > 1 && u.every(x => known.has(x)); });
-    const wDueWords = readable.filter(w => { const st = idx.state(w.id, 'typing'); return st.reps && st.due <= now; });
-    const wNew = readable.filter(w => !idx.seen(w.id, 'typing'));
-    const words = [...wDueWords, ...wNew].slice(0, 5);
+    let words = [];
+    if (s.courseWords) {
+      const known = A.knownKana(); for (const f of fresh) known.add(f.text);
+      const readable = A.wordPool(s.script).filter(w => { const u = D.units(w.text); return u.length > 1 && u.every(x => known.has(x)); });
+      const wDueWords = readable.filter(w => { const st = idx.state(w.id, 'typing'); return st.reps && st.due <= now; });
+      const wNew = readable.filter(w => !idx.seen(w.id, 'typing'));
+      words = [...wDueWords, ...wNew].slice(0, 5);
+    }
     const minutes = Math.max(1, Math.round((due.length * 6 + fresh.length * 40 + write.length * 22 + words.length * 10) / 60));
-    return { due, dueMore: dueAll.length - due.length, fresh, write, words, minutes, total: due.length + fresh.length + write.length + words.length, pool };
+    return { due, dueMore: dueAll.length - due.length, fresh, write, words, minutes, total: due.length + fresh.length + write.length + words.length, pool: all, rows, left };
   };
 
   // ── 회차 시작·끝 ──
@@ -49,12 +55,12 @@
   A.startCourse = () => {
     const p = A.coursePlan(), s = set(), phases = [];
     if (!p.total) { toast('지금은 복습할 글자도 새로 배울 글자도 없어요.'); return; }
-    if (p.due.length) phases.push({ key: 'review', label: '복습', mode: 'read', queue: SC.makeQueue(p.due) });
+    if (p.due.length) phases.push({ key: 'review', label: '복습', mode: 'read', queue: SC.makeQueue(SC.shuffle(p.due)) });
     for (let i = 0; i < p.fresh.length; i += 3) { const batch = p.fresh.slice(i, i + 3); phases.push({ type: 'learn', key: 'learn', label: '새 글자', items: batch, i: 0 }, { key: 'new', label: '새 글자', mode: 'read', queue: SC.makeQueue(SC.shuffle(batch)) }); }
     if (p.fresh.length > 3) phases.push({ key: 'mix', label: '새 글자 섞어서', mode: 'read', queue: SC.makeQueue(SC.shuffle(p.fresh)) });
-    if (p.write.length) phases.push({ key: 'write', label: '써 보기', mode: 'write', queue: SC.makeQueue(p.write) });
-    if (p.words.length) phases.push({ key: 'words', label: '단어 읽기', mode: 'typing', queue: SC.makeQueue(p.words) });
-    begin({ kind: 'course', script: s.script, phases }, { mode: 'course', range: [...s.range], newLimit: s.newLimit });
+    if (p.write.length) phases.push({ key: 'write', label: '써 보기', mode: 'write', queue: SC.makeQueue(SC.shuffle(p.write)) });
+    if (p.words.length) phases.push({ key: 'words', label: '단어 읽기', mode: 'typing', queue: SC.makeQueue(SC.shuffle(p.words)) });
+    begin({ kind: 'course', script: s.script, phases }, { mode: 'course', range: [...s.range], newLimit: s.newLimit, ...(p.rows.length ? { rows: [...p.rows] } : {}) });
   };
   A.startPlacement = () => {
     const s = set(), script = s.script === 'mix' ? 'h' : s.script;
@@ -66,8 +72,10 @@
     const typeKind = mode === 'typing' ? (opt.typeKind || s.typeKind) : null;
     let study = opt.study || s.study;
     let pool = opt.pool || (mode === 'typing' && typeKind === 'words' ? A.wordPool(script) : A.kanaPool(script, range));
+    const rows = opt.pool || (mode === 'typing' && typeKind === 'words') ? [] : (s.rows || []).filter(r => A.rowsFor(script, range).some(x => x.key === r));
+    if (rows.length) pool = pool.filter(k => A.inRows(k, rows)); // 자유 연습에서 고른 행만
     if (mode === 'pair') pool = pool.filter(i => A.partnersOf(i, 2).real > 0);
-    if (!pool.length) { toast(mode === 'pair' ? '이 범위에는 헷갈릴 만한 글자가 없어요.' : '연습할 글자 범위를 하나 이상 골라 주세요.'); return; }
+    if (!pool.length) { toast(mode === 'pair' ? (rows.length ? '고른 행에는 헷갈릴 만한 글자가 없어요. 행을 더 골라 보세요.' : '이 범위에는 헷갈릴 만한 글자가 없어요.') : '연습할 글자 범위를 하나 이상 골라 주세요.'); return; }
     if (mode === 'typing' && typeKind === 'chars' && study === 'adaptive') study = 'normal';
     let seqPool = null;
     if (mode === 'typing' && typeKind === 'chars' && study === 'review') {
@@ -80,7 +88,7 @@
     const phases = [];
     if (study === 'adaptive' && run.newItems.length && run.newItems[0].kind === 'kana' && mode !== 'pair') phases.push({ type: 'learn', key: 'learn', label: '새 글자', items: run.newItems.slice(0, 6), i: 0 });
     phases.push({ key: 'free', label: A.MODE_KO[mode], mode, run, typeKind, seqPool });
-    begin({ kind: 'free', script, range, study, typeKind, phases, freeMode: mode }, { mode, study, typeKind, range: [...range], newLimit: s.newLimit });
+    begin({ kind: 'free', script, range, study, typeKind, phases, freeMode: mode }, { mode, study, typeKind, range: [...range], newLimit: s.newLimit, ...(rows.length ? { rows: [...rows] } : {}) });
   };
   A.endSession = (completed = false) => {
     const sess = A.sess; if (!sess) return;

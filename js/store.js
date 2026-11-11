@@ -47,6 +47,7 @@
     if (s.mode !== undefined && !MODES.includes(s.mode) && !['course', 'placement'].includes(s.mode)) return 'mode';
     if (s.script !== undefined && !SCRIPTS.includes(s.script)) return 'script';
     if (!optNum(s.n, 0, 1e7)) return 'n';
+    if (s.rows !== undefined && !(Array.isArray(s.rows) && s.rows.length <= 60 && s.rows.every(x => isStr(x, 4)))) return 'rows';
     return '';
   }
   function checkPack(p) {
@@ -84,12 +85,13 @@
     db.quarantine.push(...bad);
     return db;
   }
-  const SETTING_KEYS = { script: ['h', 'k', 'mix'], newLimit: [5, 10, 15, 20], tolerance: ['strict', 'normal', 'relaxed'], palm: ['auto', 'pen', 'all'], range: null, onboarded: [true, false], wordsFirst: [true, false], usePacks: [true, false], collect: [true, false], learnMine: [true, false], study: ['adaptive', 'normal', 'review'], typeKind: ['words', 'chars'], auto: [true, false], courseWrite: [true, false], placed: [true, false] };
+  const SETTING_KEYS = { script: ['h', 'k', 'mix'], newLimit: [0, 3, 5, 10, 15, 20], dueMax: [10, 20, 30, 999], courseWords: [true, false], newRows: null, rows: null, tolerance: ['strict', 'normal', 'relaxed'], palm: ['auto', 'pen', 'all'], range: null, onboarded: [true, false], wordsFirst: [true, false], usePacks: [true, false], collect: [true, false], learnMine: [true, false], study: ['adaptive', 'normal', 'review'], typeKind: ['words', 'chars'], auto: [true, false], courseWrite: [true, false], placed: [true, false] };
   function sanitizeSettings(s) {
     const out = {};
     for (const [k, allowed] of Object.entries(SETTING_KEYS)) {
       if (!(k in s)) continue;
       if (k === 'range') { if (Array.isArray(s.range)) out.range = s.range.filter(x => ['basic', 'voiced', 'yoon', 'ext'].includes(x)); continue; }
+      if (k === 'newRows' || k === 'rows') { if (Array.isArray(s[k])) out[k] = [...new Set(s[k].filter(x => typeof x === 'string' && x.length > 0 && x.length <= 4))].slice(0, 60); continue; }
       if (allowed.includes(s[k])) out[k] = s[k];
     }
     return out;
