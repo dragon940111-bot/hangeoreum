@@ -173,7 +173,7 @@ const coarse = () => mobileOS() && AI.canShare();
     const r = cur && cur.result; if (!r) return;
     const box = $('#gotBox');
     if (r.pack) {
-      A.db.packs = A.db.packs || []; A.db.packs.push(r.pack); A.db.settings.usePacks = true;
+      A.db.packs = A.db.packs || []; A.db.packs.push(r.pack); A.db.settings.usePacks = true; A.sync && (A.sync.mark('p', r.pack.id), A.sync.markSettings());
       if (!A.save()) { A.db.packs.pop(); toast('저장하지 못했어요.'); return; }
       box.innerHTML = `<div class="note info"><b>${esc(r.pack.name)}</b>의 ${r.pack.words.length}개를 단어 읽기에 넣었어요.<div class="row" style="margin-top:10px"><button class="btn sm primary" data-act="coach-drill" data-id="${esc(r.pack.id)}">지금 읽어 보기</button><button class="btn sm" data-act="close">닫기</button></div></div>`;
     } else {

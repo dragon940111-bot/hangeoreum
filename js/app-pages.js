@@ -307,6 +307,7 @@
       <h2 class="h2 section">기록 보관</h2><div class="list">
         ${li('기록 백업하기', '기기를 바꾸거나 주소가 바뀔 때를 위해 가끔 저장해 두세요.', `<button class="btn sm primary" data-act="export-json">백업 파일 저장</button>`)}
         ${li('기록 가져오기', '<span id="backupStatus">백업 파일을 고르면 지금 기록에 합쳐요. 같은 기록은 한 번만 들어가고, 지금 기록은 지워지지 않아요. 예전 가나연습실 백업도 돼요.</span>', `<div class="row"><label class="btn sm"><input type="file" id="importFile" accept=".json,application/json" class="vh">파일 고르기</label><button class="btn sm" data-act="paste-import">붙여 넣기</button></div>`)}
+        ${A.syncHTML ? A.syncHTML(li) : ''}
         ${li('저장 공간', `기본 저장 공간의 약 ${used}%를 쓰고 있어요.${used > 70 ? ' 많이 찼어요. 백업을 저장해 두세요.' : ''} ${A.mirrorState === 'none' ? '이 브라우저에서는 예비 저장소를 쓸 수 없어요.' : A.mirrorState === 'failed' ? '예비 저장소에 저장하지 못했어요. 백업 파일을 저장해 두세요.' : '같은 기록을 예비 저장소(IndexedDB)에도 저장해서, 기본 공간이 차도 기록이 남아요.'}`, '')}
       </div>
       <h2 class="h2 section">기록 지우기</h2><div class="list">${li('모든 공부 기록 지우기', '백업이 없으면 되돌릴 수 없어요.', `<button class="btn sm danger" data-act="reset">지우기</button>`)}</div>
@@ -319,7 +320,7 @@
       const copy = JSON.parse(JSON.stringify(A.db)); // 실패하면 원래 기록을 그대로 두려고 사본에서 먼저 합쳐요
       const r = S.mergeBackup(copy, text), db = A.db;
       db.attempts = copy.attempts; db.sessions = copy.sessions; db.packs = copy.packs; db.quarantine = copy.quarantine;
-      A.reindex(); A.save();
+      A.reindex(); A.save(); if (A.sync) A.sync.markAll();
       msg(`기록 ${r.added}개를 가져왔어요.${r.duplicates ? ` 이미 있던 ${r.duplicates}개는 건너뛰었어요.` : ''}${r.rejected > 0 ? ` 형식이 맞지 않는 ${r.rejected}개는 넣지 않았어요.` : ''}`);
       toast('기록을 가져왔어요.');
     } catch (err) { msg('가져오지 못했어요. ' + err.message + ' 지금 기록은 그대로예요.'); }
@@ -335,6 +336,6 @@
     'paste-import-go': () => importText($('#pasteText').value),
     'clear-mine': () => A.ask('기억해 둔 내 글씨체를 모두 지울까요? 공부 기록은 그대로 남아요.', '지우기', true).then(y => { if (y) { A.db.mine = {}; A.save(); A.pages.prefs(); } }),
     'del-pack': b => { const id = b.dataset.id; A.ask('이 단어장을 뺄까요? 이미 푼 기록은 남아요.', '빼기', true).then(y => { if (y) { A.db.packs = A.db.packs.filter(p => p.id !== id); A.save(); A.pages.prefs(); } }); },
-    reset: () => A.ask('모든 공부 기록을 지울까요? 백업이 없으면 되돌릴 수 없어요.', '모두 지우기', true).then(y => { if (!y) return; const keep = A.db.settings; A.db = A.store.db = S.emptyDB(); A.db.settings = keep; A.reindex(); A.save(); toast('기록을 지웠어요.'); A.pages.prefs(); })
+    reset: () => A.ask(A.sync && A.sync.on ? '이 기기의 공부 기록을 모두 지울까요? 기기 맞추기는 꺼지고, 저장소와 다른 기기의 기록은 그대로 남아요. 백업이 없으면 이 기기에서는 되돌릴 수 없어요.' : '모든 공부 기록을 지울까요? 백업이 없으면 되돌릴 수 없어요.', '모두 지우기', true).then(y => { if (!y) return; const was = A.sync && A.sync.on; if (was) A.sync.disconnect(); const keep = A.db.settings; A.db = A.store.db = S.emptyDB(); A.db.settings = keep; A.reindex(); A.save(); toast(was ? '이 기기의 기록을 지우고 기기 맞추기를 껐어요.' : '기록을 지웠어요.'); A.pages.prefs(); })
   });
 })();

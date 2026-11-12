@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const { data: D, store: S, sched: SC, stats: ST } = KL;
-  const A = KL.app = { VERSION: '0.3.2', pages: {}, acts: {}, segs: {} };
+  const A = KL.app = { VERSION: '0.4.0', pages: {}, acts: {}, segs: {} };
   const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
@@ -22,7 +22,7 @@
   A.db = store.db; A.idx = SC.makeIndex(A.db.attempts);
   const DEF = { dueMax: 30, courseWords: true, newRows: [], rows: [], script: 'h', newLimit: 5, tolerance: 'relaxed', palm: 'auto', range: ['basic'], wordsFirst: true, usePacks: true, collect: true, learnMine: true, study: 'adaptive', typeKind: 'words', auto: false, courseWrite: true };
   const set = A.set = () => ({ ...DEF, ...A.db.settings });
-  A.setSetting = (k, v) => { A.db.settings[k] = v; save(); };
+  A.setSetting = (k, v) => { A.db.settings[k] = v; if (A.sync) A.sync.markSettings(); save(); };
   // 예비 저장소: 기본 저장이 실패했는데 예비 저장도 실패하면 그때 알림
   let IDB0 = null; try { IDB0 = !LS._memory && typeof indexedDB !== 'undefined' ? indexedDB : null; } catch (e) { } // 막힌 틀(아티팩트 등)에서는 손대기만 해도 오류가 날 수 있음
   let mirror = null; try { mirror = S.makeMirror(IDB0, (ok, v) => {
@@ -45,7 +45,7 @@
   // 열 때: 예비 저장소에 기본 저장보다 기록이 많으면(기본 저장 공간이 찼던 경우) 빠진 것만 더함
   A.mirrorReady = mirror && !store.corrupt ? mirror.meta().then(m => (m && m.lsOk === false && m.n > A.db.attempts.length) ? mirror.get() : null).then(v => {
     if (!v || typeof v.json !== 'string' || v.lsOk !== false || !(v.n > A.db.attempts.length)) return 0; // 마지막 예비 저장 때 기본 저장이 실패했던 경우만(기록을 지운 뒤 되살아나지 않게)
-    try { const r = S.mergeBackup(A.db, v.json); if (r.added || r.sessions) { A.reindex(); A.db.meta.restoredFromMirror = { at: new Date().toISOString(), added: r.added, sessions: r.sessions }; save(); A.restoredNote = `기본 저장 공간이 차서 예비 저장소에 있던 기록 ${r.added}개를 불러왔어요. 설정에서 백업 파일을 저장해 두세요.`; if (A.render && !A.sess) A.render(); toast(A.restoredNote); } return r.added; } catch (e) { return 0; }
+    try { const r = S.mergeBackup(A.db, v.json); if (r.added || r.sessions) { A.reindex(); if (A.sync) A.sync.markAll(); A.db.meta.restoredFromMirror = { at: new Date().toISOString(), added: r.added, sessions: r.sessions }; save(); A.restoredNote = `기본 저장 공간이 차서 예비 저장소에 있던 기록 ${r.added}개를 불러왔어요. 설정에서 백업 파일을 저장해 두세요.`; if (A.render && !A.sess) A.render(); toast(A.restoredNote); } return r.added; } catch (e) { return 0; }
   }) : Promise.resolve(0);
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persisted().then(p => p || navigator.storage.persist()).catch(() => { }); } catch (e) { }
   A.reindex = () => { A.idx = SC.makeIndex(A.db.attempts); A.confCache = null; };

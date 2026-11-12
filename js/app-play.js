@@ -49,7 +49,7 @@
   function begin(sess, rec) {
     A.closeSheet();
     Object.assign(sess, { id: uuid(), start: new Date().toISOString(), n: 0, c: 0, seq: 0, pi: 0, q: null, answered: false, hidden: 0, hiddenAt: 0, guard: 0, wrongs: [] });
-    A.db.sessions.push({ id: sess.id, start: sess.start, end: null, script: sess.script, n: 0, ...rec });
+    A.db.sessions.push({ id: sess.id, start: sess.start, end: null, script: sess.script, n: 0, ...rec }); A.sync && A.sync.mark('s', sess.id);
     A.sess = sess; A.save(); A.go('play');
   }
   A.startCourse = () => {
@@ -94,7 +94,7 @@
     const sess = A.sess; if (!sess) return;
     clearTimeout(autoTimer);
     const rec = A.db.sessions.find(x => x.id === sess.id);
-    if (rec) { rec.end = new Date().toISOString(); rec.n = sess.n; rec.c = sess.c; if (!sess.n) A.db.sessions.splice(A.db.sessions.indexOf(rec), 1); }
+    if (rec) { rec.end = new Date().toISOString(); rec.n = sess.n; rec.c = sess.c; if (!sess.n) A.db.sessions.splice(A.db.sessions.indexOf(rec), 1); else if (A.sync) { A.sync.mark('s', sess.id); setTimeout(() => A.sync.run(), 600); } }
     if (pad) { pad.destroy(); pad = null; }
     A.lastResult = { id: sess.id, kind: sess.kind, completed, n: sess.n, c: sess.c, mode: sess.freeMode || sess.kind, wrongs: sess.wrongs, script: sess.script, range: sess.range, typeKind: sess.typeKind };
     if (sess.kind === 'placement' && sess.n) A.setSetting('placed', true);
@@ -240,7 +240,7 @@
     if (sess.kind !== 'free') a.phase = ph.key;
     if (q.parts) a.parts = q.parts;
     if (correct && !a.lenient && q.kind === 'kana' && sess.mode === 'read' && sess.kind !== 'placement' && a.elapsedMs > SLOW_MS) a.slow = true;
-    A.db.attempts.push(a); A.idx.push(a); sess.last = a; A.confCache = null;
+    A.db.attempts.push(a); A.idx.push(a); sess.last = a; A.confCache = null; A.sync && A.sync.mark('a', a.id);
     settle(q, correct && !a.assisted);
     sess.n++; if (correct) sess.c++; else sess.wrongs.push(q);
     const rec = A.db.sessions.find(x => x.id === sess.id); if (rec) { rec.n = sess.n; rec.c = sess.c; }
@@ -331,7 +331,7 @@
   function fix(right) {
     const sess = A.sess, a = sess && sess.last; if (!a || a.correct === right) return;
     if (a.originalCorrect === undefined) a.originalCorrect = a.correct;
-    a.correct = right; a.corrected = true; a.correctedAt = new Date().toISOString();
+    a.correct = right; a.corrected = true; a.correctedAt = new Date().toISOString(); A.sync && A.sync.mark('a', a.id);
     if (right) { sess.c++; sess.wrongs = sess.wrongs.filter(w => w.id !== sess.q.id); } else { sess.c--; sess.wrongs.push(sess.q); }
     A.idx.touch(a.itemId, a.mode); A.confCache = null;
     settle(sess.q, right && !a.assisted);
@@ -358,7 +358,7 @@
     replay: (b) => { const box = $('#strokeBox'); if (box) box.innerHTML = A.strokeSVG(b.dataset.t); },
     unknown: () => { record(false, '모르겠어요', 'unknown'); },
     pick: b => { const s = A.sess; if (!s || s.answered) return; const o = s.opts[+b.dataset.i]; s.pickedId = o.id; record(o.id === s.q.id, o.text, 'pick', o.id === s.q.id ? {} : { mistook: o.text }); },
-    hesitant: b => { const a = A.sess && A.sess.last; if (!a) return; a.hesitant = !a.hesitant; A.idx.touch(a.itemId, a.mode); A.save(); b.setAttribute('aria-pressed', String(a.hesitant)); b.textContent = a.hesitant ? '곧 다시 볼게요' : '헷갈렸어요'; },
+    hesitant: b => { const a = A.sess && A.sess.last; if (!a) return; a.hesitant = !a.hesitant; A.sync && A.sync.mark('a', a.id); A.idx.touch(a.itemId, a.mode); A.save(); b.setAttribute('aria-pressed', String(a.hesitant)); b.textContent = a.hesitant ? '곧 다시 볼게요' : '헷갈렸어요'; },
     reveal: b => { const s = A.sess; if (!s || s.answered) return; s.revealed = true; $('#ghost').classList.add('on'); b.disabled = true; toast('정답을 보고 쓰면 조금 뒤에 안 보고 한 번 더 써요.'); },
     tool: (b, v) => { if (!pad) return; pad.setTool(v); $$('[data-act="tool"]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.v === v))); },
     undo: () => { if (pad) { pad.undo(); updateTools(); } },
@@ -392,6 +392,6 @@
     if (document.hidden) s.hiddenAt = performance.now();
     else if (s.hiddenAt) { s.hidden += performance.now() - s.hiddenAt; s.hiddenAt = 0; }
   });
-  window.addEventListener('pagehide', () => { const s = A.sess; if (!s) return; const rec = A.db.sessions.find(x => x.id === s.id); if (rec) { rec.end = new Date().toISOString(); rec.n = s.n; rec.c = s.c; A.save(); } }, true);
+  window.addEventListener('pagehide', () => { const s = A.sess; if (!s) return; const rec = A.db.sessions.find(x => x.id === s.id); if (rec) { rec.end = new Date().toISOString(); rec.n = s.n; rec.c = s.c; A.sync && A.sync.mark('s', s.id); A.save(); } }, true);
   Object.defineProperty(A, 'pad', { get: () => pad });
 })();
