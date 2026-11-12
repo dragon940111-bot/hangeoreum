@@ -167,7 +167,7 @@
   function makeMirror(idb, onState) {
     if (!idb) return null;
     let dbp = null, busy = false, next = null;
-    const open = () => dbp || (dbp = new Promise((res, rej) => { const r = idb.open('hangeoreum', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); r.onblocked = () => rej(Error('blocked')); }));
+    const open = () => dbp || (dbp = new Promise((res, rej) => { let r; try { r = idb.open('hangeoreum', 1); } catch (e) { rej(e); return; } r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); r.onblocked = () => rej(Error('blocked')); }));
     const tx = (mode, fn) => open().then(db => new Promise((res, rej) => { const t = db.transaction('kv', mode), st = t.objectStore('kv'); let out; const q = fn(st); if (q) q.onsuccess = () => { out = q.result; }; t.oncomplete = () => res(out); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || Error('abort')); }));
     const pump = () => { if (busy || !next) return; const v = next; next = null; busy = true; tx('readwrite', st => { st.put(v, 'db-v2'); return st.put({ n: v.n, at: v.at, lsOk: v.lsOk }, 'db-v2-meta'); }).then(() => onState && onState(true, v), e => onState && onState(false, v, e)).finally(() => { busy = false; pump(); }); };
     return {

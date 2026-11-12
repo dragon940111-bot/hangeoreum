@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const { data: D, store: S, sched: SC, stats: ST } = KL;
-  const A = KL.app = { VERSION: '0.3.1', pages: {}, acts: {}, segs: {} };
+  const A = KL.app = { VERSION: '0.3.2', pages: {}, acts: {}, segs: {} };
   const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
@@ -24,10 +24,11 @@
   const set = A.set = () => ({ ...DEF, ...A.db.settings });
   A.setSetting = (k, v) => { A.db.settings[k] = v; save(); };
   // 예비 저장소: 기본 저장이 실패했는데 예비 저장도 실패하면 그때 알림
-  const mirror = S.makeMirror(typeof indexedDB !== 'undefined' && !LS._memory ? indexedDB : null, (ok, v) => {
+  let IDB0 = null; try { IDB0 = !LS._memory && typeof indexedDB !== 'undefined' ? indexedDB : null; } catch (e) { } // 막힌 틀(아티팩트 등)에서는 손대기만 해도 오류가 날 수 있음
+  let mirror = null; try { mirror = S.makeMirror(IDB0, (ok, v) => {
     A.mirrorState = ok ? 'ok' : 'failed';
     if (!ok && !v.lsOk) toast('이 브라우저에 저장하지 못했어요. 설정에서 기록을 백업해 주세요.');
-  });
+  }); } catch (e) { mirror = null; }
   A.mirrorState = mirror ? 'idle' : 'none';
   if (mirror) store.mirror = (json, n, lsOk) => mirror.put(json, n, lsOk);
   function save() {
