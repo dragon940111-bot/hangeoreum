@@ -118,7 +118,12 @@
       db: st.db, status: st.status, corrupt: st.status === 'corrupt' ? { raw: st.raw, key: st.key, error: st.error } : null, lastError: '',
       save() {
         if (store.corrupt) return false; // 손상된 원본을 지키기 위해 저장하지 않음
-        try { ls.setItem(KEY, JSON.stringify(store.db)); store.lastError = ''; return true; } catch (e) { store.lastError = e.message || String(e); return false; }
+        let json; try { json = JSON.stringify(store.db); } catch (e) { store.lastError = e.message || String(e); return false; }
+        let ok = false;
+        try { ls.setItem(KEY, json); store.lastError = ''; ok = true; } catch (e) { store.lastError = e.message || String(e); }
+        store.lsFull = !ok;
+        if (store.mirror) store.mirror(json, store.db.attempts.length, ok); // 예비 저장소(IndexedDB)에도 같은 내용
+        return ok;
       },
       // 손상 원본을 다른 키로 옮겨 둔 뒤 새로 시작 (원본은 지우지 않음)
       setAsideCorrupt() {
@@ -156,5 +161,21 @@
     for (const [id, a] of by) db.sessions.push({ id, start: a[0].time, end: a.at(-1).time, n: a.length, mode: a[0].mode, script: a[0].script, interrupted: true });
     return by.size;
   }
-  KL.store = { checkSample, KEY, KEY_V1, makeStore, load, toV2, mergeBackup, checkAttempt, checkSession, checkPack, recoverSessions, emptyDB, sanitizeSettings };
+  // ── 예비 저장소 (IndexedDB) ──
+  // 기본 저장(localStorage)과 똑같은 JSON을 한 칸에 덮어써 둠. 형식은 그대로라 백업 파일과 같음.
+  // 기본 저장 공간이 차서 저장이 실패해도 여기엔 남음 → 다음에 열 때 빠진 기록만 더해서 불러옴(mergeBackup, 기존 기록은 안 고침).
+  function makeMirror(idb, onState) {
+    if (!idb) return null;
+    let dbp = null, busy = false, next = null;
+    const open = () => dbp || (dbp = new Promise((res, rej) => { const r = idb.open('hangeoreum', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); r.onblocked = () => rej(Error('blocked')); }));
+    const tx = (mode, fn) => open().then(db => new Promise((res, rej) => { const t = db.transaction('kv', mode), st = t.objectStore('kv'); let out; const q = fn(st); if (q) q.onsuccess = () => { out = q.result; }; t.oncomplete = () => res(out); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || Error('abort')); }));
+    const pump = () => { if (busy || !next) return; const v = next; next = null; busy = true; tx('readwrite', st => { st.put(v, 'db-v2'); return st.put({ n: v.n, at: v.at, lsOk: v.lsOk }, 'db-v2-meta'); }).then(() => onState && onState(true, v), e => onState && onState(false, v, e)).finally(() => { busy = false; pump(); }); };
+    return {
+      put(json, n, lsOk) { next = { json, n, at: new Date().toISOString(), lsOk }; pump(); }, // 여러 번 와도 마지막 것 하나만 씀
+      meta: () => tx('readonly', st => st.get('db-v2-meta')).catch(() => null), // 작은 요약만(열 때 3MB 전체를 읽지 않게)
+      get: () => tx('readonly', st => st.get('db-v2')).catch(() => null),
+      flushing: () => busy || !!next
+    };
+  }
+  KL.store = { makeMirror, checkSample, KEY, KEY_V1, makeStore, load, toV2, mergeBackup, checkAttempt, checkSession, checkPack, recoverSessions, emptyDB, sanitizeSettings };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

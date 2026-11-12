@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const { data: D, store: S, sched: SC, stats: ST } = KL;
-  const A = KL.app = { VERSION: '0.3.0', pages: {}, acts: {}, segs: {} };
+  const A = KL.app = { VERSION: '0.3.1', pages: {}, acts: {}, segs: {} };
   const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
@@ -23,8 +23,30 @@
   const DEF = { dueMax: 30, courseWords: true, newRows: [], rows: [], script: 'h', newLimit: 5, tolerance: 'relaxed', palm: 'auto', range: ['basic'], wordsFirst: true, usePacks: true, collect: true, learnMine: true, study: 'adaptive', typeKind: 'words', auto: false, courseWrite: true };
   const set = A.set = () => ({ ...DEF, ...A.db.settings });
   A.setSetting = (k, v) => { A.db.settings[k] = v; save(); };
-  function save() { const ok = store.save(); if (!ok && !store.corrupt) toast('이 브라우저에 저장하지 못했어요. 설정에서 기록을 백업해 주세요.'); return ok; }
+  // 예비 저장소: 기본 저장이 실패했는데 예비 저장도 실패하면 그때 알림
+  const mirror = S.makeMirror(typeof indexedDB !== 'undefined' && !LS._memory ? indexedDB : null, (ok, v) => {
+    A.mirrorState = ok ? 'ok' : 'failed';
+    if (!ok && !v.lsOk) toast('이 브라우저에 저장하지 못했어요. 설정에서 기록을 백업해 주세요.');
+  });
+  A.mirrorState = mirror ? 'idle' : 'none';
+  if (mirror) store.mirror = (json, n, lsOk) => mirror.put(json, n, lsOk);
+  function save() {
+    const ok = store.save();
+    if (!ok && !store.corrupt) toast(mirror ? '기본 저장 공간이 찼어요. 예비 저장소에 저장하고 있어요. 설정에서 백업 파일도 저장해 두세요.' : '이 브라우저에 저장하지 못했어요. 설정에서 기록을 백업해 주세요.');
+    return ok;
+  }
   A.save = save;
+  // 답한 뒤에는 맞음·틀림 화면을 먼저 그리고 저장(기록이 많으면 저장에 0.1~0.3초 걸림). 창을 닫거나 숨기면 바로 저장.
+  let saveTimer = 0;
+  A.saveSoon = () => { if (saveTimer) return; saveTimer = requestAnimationFrame(() => setTimeout(() => { saveTimer = 0; save(); }, 0)); };
+  A.flushSave = () => { if (!saveTimer) return; cancelAnimationFrame(saveTimer); saveTimer = 0; save(); };
+  addEventListener('pagehide', A.flushSave); document.addEventListener('visibilitychange', () => { if (document.hidden) A.flushSave(); });
+  // 열 때: 예비 저장소에 기본 저장보다 기록이 많으면(기본 저장 공간이 찼던 경우) 빠진 것만 더함
+  A.mirrorReady = mirror && !store.corrupt ? mirror.meta().then(m => (m && m.lsOk === false && m.n > A.db.attempts.length) ? mirror.get() : null).then(v => {
+    if (!v || typeof v.json !== 'string' || v.lsOk !== false || !(v.n > A.db.attempts.length)) return 0; // 마지막 예비 저장 때 기본 저장이 실패했던 경우만(기록을 지운 뒤 되살아나지 않게)
+    try { const r = S.mergeBackup(A.db, v.json); if (r.added || r.sessions) { A.reindex(); A.db.meta.restoredFromMirror = { at: new Date().toISOString(), added: r.added, sessions: r.sessions }; save(); A.restoredNote = `기본 저장 공간이 차서 예비 저장소에 있던 기록 ${r.added}개를 불러왔어요. 설정에서 백업 파일을 저장해 두세요.`; if (A.render && !A.sess) A.render(); toast(A.restoredNote); } return r.added; } catch (e) { return 0; }
+  }) : Promise.resolve(0);
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persisted().then(p => p || navigator.storage.persist()).catch(() => { }); } catch (e) { }
   A.reindex = () => { A.idx = SC.makeIndex(A.db.attempts); A.confCache = null; };
   if (S.recoverSessions(A.db)) save();
 
@@ -80,14 +102,18 @@
     return out;
   };
   A.inRows = (k, rows) => !rows || !rows.length || rows.includes(A.rowOf(k));
+  // 배운 글자: 읽기에서 한 번이라도 배운 것(히라가나·가타카나, 범위·행 상관없이). '섞어서 풀기'에 씀
+  A.learnedPool = () => D.KANA.filter(k => A.idx.seen(k.id, 'read'));
   A.knownKana = () => { const s = new Set(); for (const k of D.KANA) if (A.idx.get(k.id, 'read').some(a => a.correct && !a.assisted)) s.add(k.text); return s; };
 
   // ── 작은 도구 ──
   let toastTimer = 0;
   function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('on'), 3000); }
   function download(name, text, type) { try { const b = text instanceof Blob ? text : new Blob([text], { type }), a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); } catch (e) { } }
-  const fmt = t => new Date(t).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-  const fmtFull = t => new Date(t).toLocaleString('ko-KR');
+  // 날짜 글자: 형식기를 한 번만 만들어 씀(기록이 많을 때 toLocaleString을 매번 부르면 느림). 보이는 글자는 전과 같음
+  const F_SHORT = new Intl.DateTimeFormat('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }), F_FULL = new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' });
+  const fmt = t => F_SHORT.format(new Date(t));
+  const fmtFull = t => F_FULL.format(new Date(t));
   function whenDue(t) { if (!t) return '아직'; const n = t - Date.now(); if (n <= 0) return '지금'; if (n < 36e5) return Math.ceil(n / 6e4) + '분 뒤'; if (n < 864e5) return Math.ceil(n / 36e5) + '시간 뒤'; return Math.ceil(n / 864e5) + '일 뒤'; }
   function seg(name, opts, value, attrs = '') { return `<div class="seg" role="group" ${attrs}>${opts.map(([v, l]) => `<button type="button" data-seg="${esc(name)}" data-v="${esc(v)}" aria-pressed="${String(v) === String(value)}">${esc(l)}</button>`).join('')}</div>`; }
   function copyText(t) { return (navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(t) : Promise.reject()).catch(() => { const ta = document.createElement('textarea'); ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (e) { } ta.remove(); }); }

@@ -1,6 +1,6 @@
 // 인터넷 없이도 열리게 하는 일꾼. 판이 바뀌면 아래 VERSION을 올려요(옛 저장분은 지워져요).
 // 화면 파일(index.html)은 인터넷이 되면 새것을 먼저 받고, 나머지는 저장해 둔 것을 먼저 써요. 공부 기록(localStorage)은 건드리지 않아요.
-const VERSION = 'hangeoreum-0.3.0';
+const VERSION = 'hangeoreum-0.3.1';
 const FILES = ['./', 'index.html', 'manifest.webmanifest', 'icon.png', 'icon-512.png', 'apple-touch-icon.png', 'css/app.css',
   'fonts/KleeOne-kana.woff2', 'fonts/Pretendard-Regular.subset.woff2', 'fonts/Pretendard-SemiBold.subset.woff2', 'fonts/Pretendard-Bold.subset.woff2',
   'js/strokes-data.js', 'js/data.js', 'js/text.js', 'js/store.js', 'js/scheduler.js', 'js/stats.js', 'js/recognize.js', 'js/ink.js', 'js/claude.js', 'js/ai.js', 'js/app.js', 'js/app-play.js', 'js/app-pages.js', 'js/app-coach.js'];

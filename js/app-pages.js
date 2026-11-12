@@ -64,6 +64,7 @@
     const basic = A.kanaPool(s.script === 'mix' ? 'h' : s.script, ['basic']);
     const solid = basic.filter(i => A.idx.state(i.id, 'read').stage >= 2).length;
     const widen = !s.range.includes('voiced') && solid >= basic.length * .8 ? `<div class="note info rowed"><span>기본 글자를 거의 다 익혔어요. 이제 탁음·반탁음(が, ぱ)도 배워 볼까요?</span><button class="btn sm" data-act="add-range" data-v="voiced">범위에 넣기</button></div>` : '';
+    const learned = A.learnedPool(), learnedBoth = new Set(learned.map(k => k.script)).size > 1;
     $('#view').innerHTML = `${notice()}
       <div class="page-head"><div><h1 class="h1">오늘 공부</h1><p class="sub">${today.n ? `오늘 ${today.n}문제를 풀었어요. 정답률 ${Math.round(today.c / today.n * 100)}%` : streak.streak ? `${streak.streak}일째 이어 가는 중이에요.` : '하루 10분, 조금씩 꾸준히.'}</p></div>
         ${seg('script', [['h', '히라가나'], ['k', '가타카나'], ['mix', '둘 다']], s.script, 'aria-label="공부할 글자"')}</div>
@@ -71,6 +72,7 @@
       <a class="progress-card" href="#chart"><div><b>${A.SCRIPT_KO[s.script === 'mix' ? 'h' : s.script]} ${mc.total}자 중 ${mc.known}자를 읽을 수 있어요</b><span class="small">글자표에서 한 글자씩 볼 수 있어요</span></div>${mc.html}</a>
       <h2 class="h2 section">자유 연습</h2>
       <div class="list">
+        ${learned.length >= 4 ? `<button data-act="mix-learned"><span class="li-ico">${icon('mix')}</span><span class="li-body"><b>배운 글자 섞어서 풀기</b><span>지금까지 배운 ${learned.length}자${learnedBoth ? '(히라가나·가타카나)' : ''}가 순서 없이 섞여 나와요</span></span>${icon('chev')}</button>` : ''}
         <button data-act="setup" data-mode="read"><span class="li-ico">${icon('read')}</span><span class="li-body"><b>읽기</b><span>글자를 보고 소리를 한글로 입력해요</span></span>${icon('chev')}</button>
         <button data-act="setup" data-mode="write"><span class="li-ico">${icon('pen')}</span><span class="li-body"><b>쓰기</b><span>소리를 보고 글자를 손으로 써요</span></span>${icon('chev')}</button>
         <button data-act="setup" data-mode="typing"><span class="li-ico">${icon('keys')}</span><span class="li-body"><b>단어 읽기</b><span>단어나 글자 여러 개를 빠르게 읽어요</span></span>${icon('chev')}</button>
@@ -98,6 +100,7 @@
   }
   Object.assign(A.acts, {
     course: () => A.startCourse(),
+    'mix-learned': () => { const pool = A.learnedPool(); if (pool.length < 4) { toast('배운 글자가 4자 넘으면 섞어서 풀 수 있어요.'); return; } A.startFree({ mode: 'read', study: 'normal', pool, label: '배운 글자 섞어서', script: new Set(pool.map(k => k.script)).size > 1 ? 'mix' : pool[0].script }); },
     placement: () => A.startPlacement(),
     setup: b => setupSheet(b.dataset.mode),
     start: b => A.startFree({ mode: b.dataset.mode || $('#sheet').dataset.mode, study: b.dataset.study }),
@@ -231,11 +234,16 @@
 
   // ── 기록 ──
   let statMode = 'all', statSession = '', statLimit = 30, dueLimit = 30;
+  // '하나씩 보기'는 펼칠 때 채움(기록이 많으면 접힌 목록까지 다 그리느라 느렸음 — 보이는 내용은 전과 같음)
+  const rowKey = a => esc(a.mode + '|' + a.itemId);
+  let statRows = new Map();
+  const tlHTML = ({ list, s }) => list.map((b, i) => `<div class="tl"><b>${i + 1}번째 · ${b.correct ? '맞음' : '틀림'}</b>${b.assisted ? ' · 정답을 보고 풂' : ''}${b.corrected ? ' · 채점을 고침' : ''}${b.lenient ? ' · 긴 소리 빠짐' : ''}${b.slow ? ' · 오래 걸림' : ''}${b.source === 'placement' ? ' · 아는 글자 확인' : ''} <span class="small">(그 회차의 ${num(b.n)}번째 문제)</span><br>${esc(fmtFull(b.time))} · ${(b.elapsedMs / 1000).toFixed(1)}초 · 입력 ‘${esc(b.input)}’</div>`).join('') + `<p class="small">연속으로 가장 많이 틀린 횟수 ${s.maxWrong}번</p>`;
+  document.addEventListener('toggle', e => { const d = e.target; if (!(d instanceof HTMLDetailsElement) || !d.open || !d.dataset.row || d.dataset.filled) return; const r = statRows.get(d.dataset.row); if (r) { d.insertAdjacentHTML('beforeend', tlHTML(r)); d.dataset.filled = '1'; } }, true);
   A.pages.stats = () => {
     let sel = A.db.attempts;
     if (statSession) sel = sel.filter(a => a.sessionId === statSession);
     if (statMode !== 'all') sel = sel.filter(a => a.mode === statMode);
-    const o = ST.overview(sel), rows = ST.byItem(sel), bad = sel.filter(a => !a.correct), conf = ST.confusions(sel).slice(0, 8);
+    const o = ST.overview(sel), rows = ST.byItem(sel); statRows = new Map(rows.map(r => [r.list[0].mode + '|' + r.list[0].itemId, r])); const bad = sel.filter(a => !a.correct), conf = ST.confusions(sel).slice(0, 8);
     const dm = statMode === 'all' ? 'read' : statMode;
     const dueList = [...D.KANA, ...A.allWords()].filter(i => A.idx.seen(i.id, dm)).map(i => ({ i, s: A.idx.state(i.id, dm) })).sort((a, b) => a.s.due - b.s.due);
     const sessions = [...A.db.sessions].sort((a, b) => Date.parse(b.start) - Date.parse(a.start)).slice(0, 300);
@@ -256,7 +264,7 @@
         return `<tr><td data-l="문제"><div><span class="kana" lang="ja">${esc(list[0].text)}</span> <span class="small">${esc(M[list[0].mode] || '')}</span></td></div></td><td data-l="틀림 / 푼 횟수"><div><span class="${s.wrong ? 'wrong' : ''}">${s.wrong}</span> / ${s.n}</td></div></td><td data-l="정답률"><div>${Math.round(s.c / s.n * 100)}%</td></div></td><td data-l="연속 정답 지금 / 최고"><div>${s.streak} / ${s.max}</td>
           </div></td><td data-l="연속 정답이 끊긴 때"><div>${s.afterCorrect.length ? s.afterCorrect.slice(-3).map(b => `${b.n}번째에 틀림 <span class="small">(${b.streak}번 연속으로 맞힌 뒤 · ${esc(fmt(b.time))})</span>`).join('<br>') : '없음'}<br><span class="small">${s.stableStart ? `${s.stableStart}번째부터 ${s.streak}번 연속 정답 (${esc(fmt(s.stableSince))}부터)` : '마지막 문제를 틀렸어요'}</span></td>
           </div></td><td data-l="마지막으로 틀린 때"><div>${last ? esc(fmt(last.time)) : '–'}</td>
-          </div></td><td data-l="최근 결과"><div><div class="flow" aria-label="최근 ${Math.min(30, list.length)}번 결과">${list.slice(-30).map(b => b.correct ? '<span class="o">●</span>' : '<span class="x">×</span>').join('')}</div><details><summary>하나씩 보기</summary>${list.map((b, i) => `<div class="tl"><b>${i + 1}번째 · ${b.correct ? '맞음' : '틀림'}</b>${b.assisted ? ' · 정답을 보고 풂' : ''}${b.corrected ? ' · 채점을 고침' : ''}${b.lenient ? ' · 긴 소리 빠짐' : ''}${b.slow ? ' · 오래 걸림' : ''}${b.source === 'placement' ? ' · 아는 글자 확인' : ''} <span class="small">(그 회차의 ${num(b.n)}번째 문제)</span><br>${esc(fmtFull(b.time))} · ${(b.elapsedMs / 1000).toFixed(1)}초 · 입력 ‘${esc(b.input)}’</div>`).join('')}<p class="small">연속으로 가장 많이 틀린 횟수 ${s.maxWrong}번</p></details></div></td></tr>`; }).join('')}
+          </div></td><td data-l="최근 결과"><div><div class="flow" aria-label="최근 ${Math.min(30, list.length)}번 결과">${list.slice(-30).map(b => b.correct ? '<span class="o">●</span>' : '<span class="x">×</span>').join('')}</div><details data-row="${rowKey(list[0])}"><summary>하나씩 보기</summary></details></div></td></tr>`; }).join('')}
       </tbody></table></div>${rows.length > statLimit ? `<div class="row" style="margin-top:12px"><button class="btn sm" data-act="more-stats">${rows.length - statLimit}개 더 보기</button></div>` : ''}
       <h2 class="h2 section">최근에 틀린 문제</h2>${bad.slice(-20).reverse().map(a => `<div class="tl"><b class="kana" lang="ja">${esc(a.text)}</b> ${esc(a.answers.join(', '))} <span class="small">${esc(M[a.mode] || '')} · ${esc(fmtFull(a.time))} · 그 회차의 ${num(a.n)}번째 문제 · 입력 ‘${esc(a.input)}’</span></div>`).join('') || '<p class="small">틀린 문제가 없어요.</p>'}`}
       <h2 class="h2 section">복습 일정 · ${esc(M[dm])}</h2><p class="small" style="margin:-6px 0 12px">맞힐 때마다 다음 복습이 10분, 1일, 3일, 7일, 14일, 30일 뒤로 늘어나요. 틀리면 3분 뒤에 다시 봐요. 이 간격은 이 앱이 정한 값이에요.</p>
@@ -299,7 +307,7 @@
       <h2 class="h2 section">기록 보관</h2><div class="list">
         ${li('기록 백업하기', '기기를 바꾸거나 주소가 바뀔 때를 위해 가끔 저장해 두세요.', `<button class="btn sm primary" data-act="export-json">백업 파일 저장</button>`)}
         ${li('기록 가져오기', '<span id="backupStatus">백업 파일을 고르면 지금 기록에 합쳐요. 같은 기록은 한 번만 들어가고, 지금 기록은 지워지지 않아요. 예전 가나연습실 백업도 돼요.</span>', `<div class="row"><label class="btn sm"><input type="file" id="importFile" accept=".json,application/json" class="vh">파일 고르기</label><button class="btn sm" data-act="paste-import">붙여 넣기</button></div>`)}
-        ${li('저장 공간', `이 브라우저 저장 공간의 약 ${used}%를 쓰고 있어요.${used > 70 ? ' 많이 찼어요. 백업을 저장해 두세요.' : ''}`, '')}
+        ${li('저장 공간', `기본 저장 공간의 약 ${used}%를 쓰고 있어요.${used > 70 ? ' 많이 찼어요. 백업을 저장해 두세요.' : ''} ${A.mirrorState === 'none' ? '이 브라우저에서는 예비 저장소를 쓸 수 없어요.' : A.mirrorState === 'failed' ? '예비 저장소에 저장하지 못했어요. 백업 파일을 저장해 두세요.' : '같은 기록을 예비 저장소(IndexedDB)에도 저장해서, 기본 공간이 차도 기록이 남아요.'}`, '')}
       </div>
       <h2 class="h2 section">기록 지우기</h2><div class="list">${li('모든 공부 기록 지우기', '백업이 없으면 되돌릴 수 없어요.', `<button class="btn sm danger" data-act="reset">지우기</button>`)}</div>
       <p class="small section">일본어 한걸음 ${A.VERSION} · 글자 ${D.KANA.length}개 · 기본 단어 ${D.WORDS.length}개 · ${off}<br>쓰는 순서 자료 KanjiVG (Ulrich Apel, CC BY-SA 3.0) · 글꼴 Klee One, Pretendard (SIL OFL 1.1)<br>한글로 적은 소리는 실제 일본어 발음과 조금 달라요.</p>`;

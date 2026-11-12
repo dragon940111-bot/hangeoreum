@@ -87,7 +87,7 @@
     const run = SC.makeRun({ pool, mode, study, newLimit: s.newLimit, index: A.idx, attempts: A.db.attempts, confusable: A.confusable, preferKnown });
     const phases = [];
     if (study === 'adaptive' && run.newItems.length && run.newItems[0].kind === 'kana' && mode !== 'pair') phases.push({ type: 'learn', key: 'learn', label: '새 글자', items: run.newItems.slice(0, 6), i: 0 });
-    phases.push({ key: 'free', label: A.MODE_KO[mode], mode, run, typeKind, seqPool });
+    phases.push({ key: 'free', label: opt.label || A.MODE_KO[mode], mode, run, typeKind, seqPool });
     begin({ kind: 'free', script, range, study, typeKind, phases, freeMode: mode }, { mode, study, typeKind, range: [...range], newLimit: s.newLimit, ...(rows.length ? { rows: [...rows] } : {}) });
   };
   A.endSession = (completed = false) => {
@@ -244,7 +244,7 @@
     settle(q, correct && !a.assisted);
     sess.n++; if (correct) sess.c++; else sess.wrongs.push(q);
     const rec = A.db.sessions.find(x => x.id === sess.id); if (rec) { rec.n = sess.n; rec.c = sess.c; }
-    A.save(); showFeedback(); updateBar();
+    showFeedback(); updateBar(); A.saveSoon();
     const auto = sess.kind === 'placement' ? (correct ? 650 : 1500) : (set().auto && correct && !a.lenient && !a.slow && sess.mode !== 'write' ? 900 : 0);
     if (auto) autoTimer = setTimeout(() => { if (A.sess === sess && sess.last === a) next(); }, auto);
   }
@@ -346,7 +346,7 @@
     // 틀리게 쓴 거라고 고치면: 방금 기억한 글씨(잘못 누른 경우)나, 이 채점을 맞다고 하게 만든 내 글씨 본보기를 뺌
     if (!right && mine[t] && (sess.addedMine || (sess.grade && sess.grade.src === 'mine'))) { mine[t].pop(); if (!mine[t].length) delete mine[t]; sess.addedMine = false; }
     const rec = A.db.sessions.find(x => x.id === sess.id); if (rec) rec.c = sess.c;
-    A.save(); showWriteFeedback(); updateBar();
+    showWriteFeedback(); updateBar(); A.saveSoon();
   }
 
   // ── 누르기 ──
@@ -392,6 +392,6 @@
     if (document.hidden) s.hiddenAt = performance.now();
     else if (s.hiddenAt) { s.hidden += performance.now() - s.hiddenAt; s.hiddenAt = 0; }
   });
-  window.addEventListener('pagehide', () => { const s = A.sess; if (!s) return; const rec = A.db.sessions.find(x => x.id === s.id); if (rec) { rec.end = new Date().toISOString(); rec.n = s.n; rec.c = s.c; A.save(); } });
+  window.addEventListener('pagehide', () => { const s = A.sess; if (!s) return; const rec = A.db.sessions.find(x => x.id === s.id); if (rec) { rec.end = new Date().toISOString(); rec.n = s.n; rec.c = s.c; A.save(); } }, true);
   Object.defineProperty(A, 'pad', { get: () => pad });
 })();
