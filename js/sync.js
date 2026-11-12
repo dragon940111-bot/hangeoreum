@@ -27,7 +27,7 @@
   // ── 바뀐 것 표시(보낼 것에 넣기) ──
   function mark(k, id) {
     if (!st || !id) return; const s = outSet(); if (!s.has(k + '|' + id)) { st.out.push([k, String(id)]); persist(); }
-    soon(30000);
+    soon(A.sess ? 5000 : 3000);
   }
   function markSettings() { if (!st) return; st.setAt = new Date().toISOString(); mark('set', 'all'); }
   function markAll() { if (!st) return; st.full = true; persist(); soon(2000); }
@@ -45,11 +45,19 @@
   // ── 받은 것 합치기 (받은 내용은 남이 보낸 것이라 앱의 검사를 그대로 거침) ──
   function apply(items) {
     let added = 0, changed = 0;
+    if (!items.length) return { added, changed }; // 받은 것이 없으면 아무것도 훑지 않음
     const ai = new Map(A.db.attempts.map((a, i) => [a.id, i])), si = new Map(A.db.sessions.map((s, i) => [s.id, i])), pi = new Map((A.db.packs || []).map((p, i) => [p.id, i]));
-    const put = (arr, idx, v, b) => { const i = idx.get(v.id); if (i === undefined) { arr.push(v); idx.set(v.id, arr.length - 1); return 1; } if (JSON.stringify(arr[i]) !== b) { const o = arr[i]; for (const k of Object.keys(o)) delete o[k]; Object.assign(o, v); changed++; } return 0; };
+    const put = (arr, idx, v, b, onChange) => { const i = idx.get(v.id); if (i === undefined) { arr.push(v); idx.set(v.id, arr.length - 1); return 1; } if (JSON.stringify(arr[i]) !== b) { const o = arr[i]; for (const k of Object.keys(o)) delete o[k]; Object.assign(o, v); changed++; if (onChange) onChange(o); } return 0; };
+    // 기록 색인은 다시 만들지 않고 새 것만 더함(1만 개를 다 훑으면 느린 기기에서 0.5초 멈췄음). 시간 순서가 어긋난 글자만 그 글자 목록을 정렬
+    const lastT = A.db.attempts.length ? Date.parse(A.db.attempts[A.db.attempts.length - 1].time) : 0;
+    let outOfOrder = false; const resort = new Map();
     for (const it of items) {
       let v; try { v = JSON.parse(it.b); } catch (e) { continue; }
-      if (it.k === 'a') { if (S.checkAttempt(v)) continue; added += put(A.db.attempts, ai, v, it.b); }
+      if (it.k === 'a') {
+        if (S.checkAttempt(v)) continue;
+        const n = put(A.db.attempts, ai, v, it.b, o => A.idx.touch(o.itemId, o.mode));
+        if (n) { added++; const t = Date.parse(v.time); if (t < lastT) outOfOrder = true; const list = A.idx.get(v.itemId, v.mode); if (list.length && Date.parse(list[list.length - 1].time) > t) resort.set(v.itemId + '|' + v.mode, [v.itemId, v.mode]); A.idx.push(v); }
+      }
       else if (it.k === 's') { if (S.checkSession(v)) continue; if (put(A.db.sessions, si, v, it.b)) changed++; }
       else if (it.k === 'p') { if (!S.checkPack(v)) continue; A.db.packs = A.db.packs || []; if (put(A.db.packs, pi, v, it.b)) changed++; }
       else if (it.k === 'set') {
@@ -57,38 +65,44 @@
         if (v.at > (st.setAt || '')) { const keep = {}; for (const x of LOCAL_ONLY) if (x in A.db.settings) keep[x] = A.db.settings[x]; A.db.settings = { ...S.sanitizeSettings(v.settings), ...keep }; st.setAt = v.at; changed++; }
       }
     }
-    if (added) A.db.attempts.sort((a, b) => Date.parse(a.time) - Date.parse(b.time));
+    if (outOfOrder) A.db.attempts.sort((a, b) => Date.parse(a.time) - Date.parse(b.time));
+    for (const [id, mode] of resort.values()) { A.idx.get(id, mode).sort((a, b) => Date.parse(a.time) - Date.parse(b.time)); A.idx.touch(id, mode); }
+    if (added || changed) A.confCache = null;
     return { added, changed };
   }
 
   // ── 한 번 맞추기: 보낼 것을 200개씩 보내면서 그 뒤에 바뀐 것을 받아 옴 ──
-  async function run() {
+  // opts.leaving: 창이 닫히거나 숨겨질 때(작으면 keepalive로 — 창이 닫혀도 끝까지 보냄)
+  async function run(opts = {}) {
     if (!st) return { ok: false, why: 'off' };
     if (busy) { again = true; return { ok: false, why: 'busy' }; }
     busy = true; clearTimeout(timer); state = 'syncing'; refreshUI();
     let got = 0, sent = 0, changed = 0;
     try {
-      const maps = { a: new Map(A.db.attempts.map(a => [a.id, a])), s: new Map(A.db.sessions.map(s => [s.id, s])), p: new Map((A.db.packs || []).map(p => [p.id, p])) };
+      // 찾아보기 표는 보낼 것이 있을 때만 만듦(기록이 많을 때 30초마다 1만 개를 훑지 않게)
+      let maps = null; const mapsOf = () => maps || (maps = { a: new Map(A.db.attempts.map(a => [a.id, a])), s: new Map(A.db.sessions.map(s => [s.id, s])), p: new Map((A.db.packs || []).map(p => [p.id, p])) });
       let fullList = st.full ? [...A.db.attempts.map(a => ['a', a.id]), ...A.db.sessions.map(s => ['s', s.id]), ...(A.db.packs || []).map(p => ['p', p.id]), ['set', 'all']] : [];
       for (let round = 0; round < 400; round++) {
         const take = [], fromOut = Math.min(st.out.length, 200);
         for (let i = 0; i < fromOut; i++) take.push(st.out[i]);
         const fromFull = fullList.slice(0, 200 - take.length);
         const push = [];
-        for (const [k, id] of [...take, ...fromFull]) { const b = bodyOf(k, id, maps); if (b && b.length <= 20000) push.push({ k, id, b }); }
-        const res = await fetch(url() + '/v1/sync', { method: 'POST', headers: { 'Authorization': 'Bearer ' + st.key, 'Content-Type': 'application/json' }, body: JSON.stringify({ since: st.seq, push }) });
+        for (const [k, id] of [...take, ...fromFull]) { const b = bodyOf(k, id, mapsOf()); if (b && b.length <= 20000) push.push({ k, id, b }); }
+        // 공부하는 중이거나 창을 떠날 때는 보내기만(받은 기록으로 푸는 화면이 바뀌지 않게) — since를 가장 큰 수로 주면 서버가 아무것도 돌려주지 않음
+        const pushOnly = !!A.sess || !!opts.leaving;
+        const body = JSON.stringify({ since: pushOnly ? Number.MAX_SAFE_INTEGER : st.seq, push });
+        const res = await fetch(url() + '/v1/sync', { method: 'POST', headers: { 'Authorization': 'Bearer ' + st.key, 'Content-Type': 'application/json' }, body, keepalive: !!opts.leaving && body.length < 60000 });
         if (res.status === 401) throw Object.assign(Error('열쇠가 맞지 않아요'), { code: 'key' });
         if (!res.ok) throw Error('서버 ' + res.status);
         const r = await res.json(); if (!r || !r.ok) throw Error((r && r.error) || '서버 응답이 이상해요');
         // 보낸 것 지우기(보내는 사이 새로 들어온 것은 남김)
         st.out.splice(0, fromOut); fullList = fullList.slice(fromFull.length); sent += push.length;
-        const ap = apply(r.items || []); got += ap.added; changed += ap.changed;
-        if (Number.isSafeInteger(r.seq) && r.seq > st.seq) st.seq = r.seq;
+        if (!pushOnly) { const ap = apply(r.items || []); got += ap.added; changed += ap.changed; if (Number.isSafeInteger(r.seq) && r.seq > st.seq) st.seq = r.seq; }
         persist();
-        if (!r.more && !st.out.length && !fullList.length) break;
+        if ((pushOnly || !r.more) && !st.out.length && !fullList.length) break;
       }
       st.full = false; st.last = new Date().toISOString(); state = 'ok'; lastErr = ''; persist();
-      if (got || changed) { A.reindex(); A.save(); if (!A.sess && A.view !== 'play') A.render(); }
+      if (got || changed) { A.saveSoon(); if (!A.sess && A.view !== 'play' && A.view !== 'prefs') A.render(); } // 저장은 화면을 그린 뒤
       return { ok: true, sent, got, changed };
     } catch (e) {
       state = navigator.onLine === false ? 'offline' : 'error'; lastErr = e.code === 'key' ? '열쇠가 맞지 않아요. 설정에서 다시 넣어 주세요.' : (navigator.onLine === false ? '인터넷이 없어서 나중에 맞춰요.' : '맞추지 못했어요. 나중에 다시 해요.');
@@ -102,10 +116,10 @@
 
   function connect(key, isNew) {
     if (!KEY_RE.test(key)) return false;
-    st = { key, seq: 0, out: [], full: true, last: '', setAt: isNew ? new Date().toISOString() : '' }; state = 'idle'; persist();
+    st = { key, seq: 0, out: [], full: true, last: '', setAt: isNew ? new Date().toISOString() : '' }; state = 'idle'; persist(); tick();
     return true;
   }
-  function disconnect() { st = null; state = 'off'; clearTimeout(timer); persist(); refreshUI(); }
+  function disconnect() { st = null; state = 'off'; clearTimeout(timer); clearTimeout(poll); persist(); refreshUI(); }
   const linkFor = key => location.href.split('#')[0] + '#sync=' + key;
 
   // ── 설정 화면 ──
@@ -150,10 +164,15 @@
     setTimeout(() => A.ask(st ? '다른 열쇠로 바꿔 연결할까요? 지금 기록은 지워지지 않고 새 저장소에 합쳐져요.' : '이 기기를 기기 맞추기에 연결할까요? 이 기기의 기록과 저장소의 기록이 합쳐져요.', '연결하기').then(y => { if (!y) return; connect(key, false); run().then(r => toast(r.ok ? `연결했어요. 기록 ${r.got}개를 받아 왔어요.` : '연결했지만 아직 맞추지 못했어요. 인터넷이 되면 다시 해요.')); if (A.view === 'prefs') A.pages.prefs(); }), 300);
   }
 
+  // ── 주기적으로: 앱이 화면에 떠 있는 동안 30초마다(공부 중엔 보내기만), 돌아오면 바로 ──
+  const POLL = () => (window.__SYNC_POLL_MS || 30000);
+  let poll = 0;
+  function tick() { clearTimeout(poll); if (!st) return; poll = setTimeout(() => { if (!document.hidden && navigator.onLine !== false) run(); tick(); }, POLL()); }
+  document.addEventListener('visibilitychange', () => { if (!st) return; if (document.hidden) { if (st.out.length || st.full) run({ leaving: true }); } else { soon(300); tick(); } });
+  addEventListener('pagehide', () => { if (st && (st.out.length || st.full)) run({ leaving: true }); });
   A.sync = { mark, markSettings, markAll, run, connect, disconnect, get on() { return !!st; }, get state() { return state; }, get pending() { return st ? st.out.length : 0; }, _st: () => st };
-  // 언제 맞추나: 열 때(예비 저장소 확인 뒤), 공부를 끝낼 때, 화면을 숨길 때, 인터넷이 다시 될 때, 바뀐 뒤 30초
-  Promise.resolve(A.mirrorReady).then(() => { fromLink(); if (st) soon(800); });
+  // 언제 맞추나: 열 때, 바뀐 뒤 3~5초(공부 중엔 보내기만), 화면에 떠 있는 동안 30초마다, 돌아왔을 때, 공부를 끝낼 때, 창을 숨기거나 닫을 때(보내기만, keepalive), 인터넷이 다시 될 때
+  Promise.resolve(A.mirrorReady).then(() => { fromLink(); if (st) { soon(800); tick(); } });
   addEventListener('hashchange', () => { if (/[#&]sync=/.test(location.hash)) fromLink(); }); // 이미 열린 창에서 연결 주소를 열었을 때
   addEventListener('online', () => soon(1000));
-  document.addEventListener('visibilitychange', () => { if (document.hidden && st && st.out.length) run(); });
 })();
